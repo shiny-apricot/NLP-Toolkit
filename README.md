@@ -1,12 +1,12 @@
 # Project Roadmap
 
-## 1. Setup & Environment (Week 1)
+## 1. Setup & Environment
 - [ ] AWS Configuration & Environment Setup
 - [ ] GitHub Copilot Installation and Configuration
 - [ ] Project Structure Implementation
 - [ ] Development Environment Setup (venv, dependencies)
 
-## 2. Basic Implementation (Week 2-3)
+## 2. Basic Implementation
 1. Abstractive Summarization with Pre-trained Models
     - [ ] Implement T5/BART base models
     - [ ] Basic prompt engineering
@@ -22,7 +22,7 @@
     - [ ] Testing infrastructure
     - [ ] Basic logging and monitoring
 
-## 3. Advanced Features (Week 4-5)
+## 3. Advanced Features
 1. Model Fine-tuning
     - [ ] Dataset preparation
     - [ ] Fine-tuning pipeline
