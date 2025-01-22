@@ -1,5 +1,35 @@
 # Copilot Instructions for Text Summarization Project
 
+
+## Project Structure
+```
+src/
+├── data/
+│   ├── preprocessing/ # Text cleaning, tokenization
+│   └── loader/       # Dataset handling, batching
+├── extractive/
+│   ├── models/      # Extractive model implementations
+│   └── ranking/     # Sentence scoring algorithms
+├── abstractive/
+│   ├── models/      # LLM model handlers
+│   ├── prompts/     # Prompt templates and engineering
+│   └── fine_tuning/ # Fine-tuning scripts
+├── hybrid/
+│   └── combiner/    # Hybrid approach implementation
+├── evaluation/
+│   ├── metrics/     # ROUGE and other metrics
+│   └── analysis/    # Error analysis, visualization
+└── utils/           # Shared utilities
+
+configs/
+├── model_configs/   # Model parameters
+├── aws_configs/     # AWS setup configurations
+└── prompt_configs/  # Prompt templates
+
+notebooks/           # Development and analysis notebooks
+```
+
+
 ## Code Style and Patterns
 
 ### General Patterns
