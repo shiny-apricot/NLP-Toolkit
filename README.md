@@ -48,8 +48,6 @@ src/
 │   ├── models/      # LLM model handlers
 │   ├── prompts/     # Prompt templates and engineering
 │   └── fine_tuning/ # Fine-tuning scripts
-├── hybrid/
-│   └── combiner/    # Hybrid approach implementation
 ├── evaluation/
 │   ├── metrics/     # ROUGE and other metrics
 │   └── analysis/    # Error analysis, visualization
