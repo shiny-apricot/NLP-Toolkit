@@ -26,9 +26,14 @@ RUN apt-get update && apt-get install -y \
 # Create app directory
 WORKDIR /app
 
-# Install Python dependencies
-COPY requirements.txt .
-RUN pip3 install --no-cache-dir -r requirements.txt
+# Install Python dependencies with constraints
+COPY constraints.txt .
+RUN pip3 install -r constraints.txt && \
+    pip3 install -r requirements.txt --no-deps --ignore-installed boto3 botocore awscli sagemaker watchtower
+
+# # Install Python dependencies
+# COPY requirements.txt .
+# RUN pip3 install --no-cache-dir -r requirements.txt
 
 # Install AWS CLI
 RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" \
