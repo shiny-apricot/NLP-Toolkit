@@ -1,0 +1,21 @@
+instance_type: "t2.xlarge"
+compute:
+  num_cpus: 4
+  memory_gb: 16
+  num_gpus: 0
+training:
+  dataset: "cnn_dailymail"
+  subset: "3.0.0"
+  max_samples: 100
+  batch_size: 2
+  gradient_accumulation_steps: 8
+  epochs: 1
+  learning_rate: 2e-5
+  fp16: false
+  num_workers: 2
+  max_length: 512
+  cache_dir: "cache"
+model:
+  model_type: "bart"
+  model_name: "facebook/bart-base"
+  dtype: "float32"
