@@ -1,53 +1,102 @@
-from dataclasses import dataclass
-from typing import Optional, Dict, Any, List, Union
-import boto3
-from pathlib import Path
-import logging
-from datasets import load_dataset, Dataset, DatasetDict
-import json
+from typing import Optional, List, Union
+from datasets import load_dataset, Dataset
 import torch
+from pathlib import Path
 from transformers import PreTrainedTokenizer
-from .preprocessing import TextPreprocessor, PreprocessingConfig
-from config_loader import InstanceConfig
+from src.utils.project_logger import get_logger
+from datetime import datetime
+import json
 
-
-@dataclass
-class DatasetConfig:
-    """Simplified configuration for dataset loading."""
-    dataset_name: str
-    text_column: str = "text"
-    summary_column: str = "summary"
-    split: str = "train"
-    max_samples: Optional[int] = None
-    cache_dir: Optional[str] = None
+class DatasetError(Exception):
+    """Base exception for dataset-related errors."""
+    pass
 
 class HuggingFaceLoader:
-    """Simplified loader focused on HuggingFace datasets."""
+    """Load and prepare datasets from HuggingFace hub."""
     
     def __init__(
         self,
+        *,  # Force named parameters
         dataset_name: str,
-        instance_config: InstanceConfig,
         text_column: str = "text",
-        summary_column: str = "summary"
+        summary_column: str = "summary",
+        cache_dir: Optional[Path] = None,
+        device: str = "cuda" if torch.cuda.is_available() else "cpu"
     ):
-        self.config = DatasetConfig(
-            dataset_name=dataset_name,
-            text_column=text_column,
-            summary_column=summary_column,
-            cache_dir=instance_config.cache_dir
-        )
-        self.instance_config = instance_config
+        """Initialize the dataset loader."""
+        self.dataset_name = dataset_name
+        self.text_column = text_column
+        self.summary_column = summary_column
+        self.cache_dir = cache_dir
+        self.device = device
+        self.logger = get_logger(__name__)
+        self._validate_params()
+
+    def _validate_params(self) -> None:
+        """Validate the initialization parameters."""
+        if not self.dataset_name:
+            raise DatasetError("Dataset name cannot be empty")
         
-    def load(self) -> Dataset:
-        """Load and prepare dataset in one step."""
-        dataset = load_dataset(
-            self.config.dataset_name,
-            split=self.config.split,
-            cache_dir=self.config.cache_dir
-        )
+        self.logger.info(json.dumps({
+            "event": "loader_initialized",
+            "dataset": self.dataset_name,
+            "device": self.device,
+            "cache_dir": str(self.cache_dir)
+        }))
+
+    def load(
+        self,
+        *,  # Force named parameters
+        split: str = "train",
+        max_samples: Optional[int] = None,
+        shuffle: bool = False
+    ) -> Dataset:
+        """Load dataset from HuggingFace hub."""
+        start_time = datetime.now()
         
-        if self.config.max_samples:
-            dataset = dataset.select(range(self.config.max_samples))
+        try:
+            self.logger.info(json.dumps({
+                "event": "loading_dataset",
+                "dataset": self.dataset_name,
+                "split": split,
+                "max_samples": max_samples
+            }))
+
+            dataset = load_dataset(
+                self.dataset_name,
+                split=split,
+                cache_dir=str(self.cache_dir) if self.cache_dir else None
+            )
             
-        return dataset
+            if shuffle:
+                dataset = dataset.shuffle()
+                
+            if max_samples:
+                dataset = dataset.select(range(min(max_samples, len(dataset))))
+
+            required_columns = [self.text_column, self.summary_column]
+            missing_columns = [col for col in required_columns if col not in dataset.column_names]
+            
+            if missing_columns:
+                raise DatasetError(f"Missing required columns: {', '.join(missing_columns)}")
+
+            processing_time = (datetime.now() - start_time).total_seconds()
+            
+            self.logger.info(json.dumps({
+                "event": "dataset_loaded",
+                "dataset": self.dataset_name,
+                "samples": len(dataset),
+                "processing_time": processing_time,
+                "memory_usage": torch.cuda.memory_allocated() if torch.cuda.is_available() else 0
+            }))
+
+            return dataset
+            
+        except Exception as e:
+            self.logger.error(json.dumps({
+                "event": "dataset_load_failed",
+                "dataset": self.dataset_name,
+                "error": str(e),
+                "processing_time": (datetime.now() - start_time).total_seconds()
+            }))
+            raise DatasetError(f"Failed to load dataset {self.dataset_name}: {str(e)}") from e

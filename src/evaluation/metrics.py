@@ -1,4 +1,3 @@
-from dataclasses import dataclass
 from typing import List, Dict, Union, Optional
 import torch
 from rouge_score import rouge_scorer
@@ -10,34 +9,30 @@ from concurrent.futures import ThreadPoolExecutor
 import nltk
 from tqdm import tqdm
 
-@dataclass
-class MetricsConfig:
-    """Configuration for evaluation metrics."""
-    rouge_types: List[str] = None
-    use_stemming: bool = True
-    batch_size: int = 32
-    num_workers: int = 4
-    device: str = "cuda" if torch.cuda.is_available() else "cpu"
-    
-    def __post_init__(self):
-        if self.rouge_types is None:
-            self.rouge_types = ["rouge1", "rouge2", "rougeL"]
-
 class SummarizationMetrics:
     """Calculate various metrics for summarization evaluation."""
     
     def __init__(
         self,
-        config: MetricsConfig,
+        *,
+        rouge_types: List[str] = None,
+        use_stemming: bool = True,
+        batch_size: int = 32,
+        num_workers: int = 4,
+        device: str = "cuda" if torch.cuda.is_available() else "cpu",
         logger: Optional[logging.Logger] = None
     ):
-        self.config = config
+        self.rouge_types = rouge_types or ["rouge1", "rouge2", "rougeL"]
+        self.use_stemming = use_stemming
+        self.batch_size = batch_size
+        self.num_workers = num_workers
+        self.device = device
         self.logger = logger or logging.getLogger(__name__)
         
         # Initialize ROUGE scorer
         self.rouge_scorer = rouge_scorer.RougeScorer(
-            self.config.rouge_types,
-            use_stemmer=config.use_stemming
+            self.rouge_types,
+            use_stemmer=use_stemming
         )
         
         # Download required NLTK data
@@ -62,7 +57,7 @@ class SummarizationMetrics:
             }
         except Exception as e:
             self.logger.error(f"ROUGE calculation failed: {str(e)}")
-            return {key: 0.0 for key in self.config.rouge_types}
+            return {key: 0.0 for key in self.rouge_types}
 
     def calculate_bleu(
         self,
@@ -121,11 +116,11 @@ class SummarizationMetrics:
             raise ValueError("Number of predictions and references must match")
 
         batch_metrics: Dict[str, List[float]] = {
-            metric: [] for metric in self.config.rouge_types + ['bleu', 'meteor']
+            metric: [] for metric in self.rouge_types + ['bleu', 'meteor']
         }
 
         # Process in parallel using ThreadPoolExecutor
-        with ThreadPoolExecutor(max_workers=self.config.num_workers) as executor:
+        with ThreadPoolExecutor(max_workers=self.num_workers) as executor:
             future_metrics = [
                 executor.submit(self.calculate_metrics, pred, ref)
                 for pred, ref in zip(predictions, references)

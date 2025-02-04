@@ -1,4 +1,3 @@
-from dataclasses import dataclass
 from typing import List, Optional, Dict, Union
 import re
 from transformers import PreTrainedTokenizer, AutoTokenizer
@@ -8,31 +7,45 @@ import nltk
 from nltk.tokenize import sent_tokenize
 import logging
 
-@dataclass
-class PreprocessingConfig:
-    """Configuration for text preprocessing."""
-    max_length: int
-    min_length: int
-    remove_urls: bool = True
-    remove_html: bool = True
-    normalize_whitespace: bool = True
-    lowercase: bool = True
-    model_name: str = "t5-base"
-
 class TextPreprocessor:
     """Handle text preprocessing for summarization tasks."""
     
     def __init__(
         self,
-        config: PreprocessingConfig,
+        *,  # Force keyword arguments
+        max_length: int,
+        min_length: int,
+        model_name: str = "t5-base",
+        remove_urls: bool = True,
+        remove_html: bool = True,
+        normalize_whitespace: bool = True,
+        lowercase: bool = True,
         tokenizer: Optional[PreTrainedTokenizer] = None,
         logger: Optional[Logger] = None
     ):
-        self.config = config
-        self.logger = logger or logging.getLogger(__name__)
-        self.tokenizer = tokenizer or AutoTokenizer.from_pretrained(config.model_name)
+        """
+        Initialize text preprocessor with explicit parameters.
         
-        # Download required NLTK data
+        Args:
+            max_length: Maximum sequence length
+            min_length: Minimum sequence length
+            model_name: Name of the pretrained model for tokenizer
+            remove_urls: Whether to remove URLs from text
+            remove_html: Whether to remove HTML tags
+            normalize_whitespace: Whether to normalize whitespace
+            lowercase: Whether to convert text to lowercase
+            tokenizer: Optional custom tokenizer
+            logger: Optional custom logger
+        """
+        self.max_length = max_length
+        self.min_length = min_length
+        self.remove_urls = remove_urls
+        self.remove_html = remove_html
+        self.normalize_whitespace = normalize_whitespace
+        self.lowercase = lowercase
+        self.logger = logger or logging.getLogger(__name__)
+        self.tokenizer = tokenizer or AutoTokenizer.from_pretrained(model_name)
+        
         try:
             nltk.data.find('tokenizers/punkt')
         except LookupError:
@@ -43,16 +56,16 @@ class TextPreprocessor:
         if not isinstance(text, str):
             raise ValueError("Input must be a string")
 
-        if self.config.remove_urls:
+        if self.remove_urls:
             text = re.sub(r'http\S+|www\S+|https\S+', '', text)
         
-        if self.config.remove_html:
+        if self.remove_html:
             text = re.sub(r'<[^>]+>', '', text)
         
-        if self.config.normalize_whitespace:
+        if self.normalize_whitespace:
             text = ' '.join(text.split())
         
-        if self.config.lowercase:
+        if self.lowercase:
             text = text.lower()
             
         return text.strip()
@@ -64,15 +77,24 @@ class TextPreprocessor:
     def tokenize(
         self,
         text: str,
+        *,  # Force keyword arguments
         return_tensors: str = "pt",
         truncation: bool = True,
         padding: bool = True
     ) -> Dict[str, torch.Tensor]:
-        """Tokenize text using the configured tokenizer."""
+        """
+        Tokenize text using the configured tokenizer.
+        
+        Args:
+            text: Input text to tokenize
+            return_tensors: Type of tensors to return
+            truncation: Whether to truncate sequences
+            padding: Whether to pad sequences
+        """
         try:
             return self.tokenizer(
                 text,
-                max_length=self.config.max_length,
+                max_length=self.max_length,
                 truncation=truncation,
                 padding=padding,
                 return_tensors=return_tensors
@@ -84,11 +106,20 @@ class TextPreprocessor:
     def batch_process(
         self,
         texts: List[str],
+        *,  # Force keyword arguments
         batch_size: int = 32
     ) -> List[Dict[str, torch.Tensor]]:
-        """Process a batch of texts."""
-        results = []
+        """
+        Process a batch of texts.
         
+        Args:
+            texts: List of input texts
+            batch_size: Size of processing batches
+        """
+        if not texts:
+            raise ValueError("Input texts list cannot be empty")
+            
+        results = []
         for i in range(0, len(texts), batch_size):
             batch = texts[i:i + batch_size]
             cleaned_batch = [self.clean_text(text) for text in batch]

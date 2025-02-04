@@ -1,14 +1,18 @@
 # Copilot Instructions for Text Summarization Project
 
 ## Description
+This is a comprehensive Python project for text summarization and other NLP tasks, designed to leverage AWS infrastructure and parallel computing capabilities. Key features include:
 
-This is a project to help us on our research projects. 
-The goal is to have some useful tools to use while working on parallel computation (multiple GPUs) and LLM models.
-Help me to write good and modular tools that I can use in different projects (especially the current summarization task.)
-Know that I will use AWS resources to run the code, so make sure to write code that can be run on AWS.
-This is a project not only for summarization but also for other NLP tasks. (e.g., text classification, translation, etc.)
-I will heavily utilize HuggingFace models and datasets.
-Write code that can be run on multiple GPUs, single GPU and CPU.
+- **Modular Design**: Well-structured tools for summarization, classification, and translation tasks
+- **Parallel Processing**: Support for multi-GPU, single-GPU, and CPU environments
+- **AWS Integration**: Optimized for AWS services (SageMaker, EC2, Lambda)
+- **Model Support**: Integration with HuggingFace's transformers for:
+    - Pre-trained model inference
+    - Fine-tuning capabilities
+    - Model parallel training
+    - Distributed data processing
+
+The codebase follows best practices for scalability, maintainability, and performance optimization, making it suitable for both research and production environments.
 
 ## Usage Scenarios
 
@@ -32,137 +36,122 @@ summarization_project/
 ├── src/ # Core project source code
 │ ├── data/ # Data handling and preprocessing
 │ │ ├── preprocessing.py # Text cleaning, tokenization, and normalization
-│ │ ├── loader.py # Load datasets from HuggingFace or S3
-│ │ └── augmentation.py # Data augmentation techniques (e.g., back translation)
+│ │ └── loader.py # Load datasets from HuggingFace or S3
 │ │
 │ ├── models/ # Summarization models
-│ │ ├── extractive_sum/ # Extractive summarization models (e.g., BERT, TextRank)
-│ │ │ ├── bert_extractive_model.py
-│ │ │ └── textrank_model.py
-│ │ ├── abstractive_sum/ # Abstractive summarization models (e.g., T5, GPT, LLaMA)
-│ │ │ ├── t5_abstractive_model.py
-│ │ │ ├── bart_abstractive_model.py
-│ │ │ └── gpt_abstractive_model.py
-│ │ ├── fine_tuning/ # Fine-tuning scripts for models
-│ │ │ ├── fine_tune_bart.py
-│ │ │ ├── fine_tune_t5.py
-│ │ │ └── fine_tune_gpt.py
-│ │ └── pipelines.py # Unified pipelines for extractive and abstractive summarization
+│ │ ├── extractive.py # Extractive summarization models
+│ │ ├── abstractive.py # Abstractive summarization models
+│ │ └── fine_tuning.py # Fine-tuning scripts
 │ │
 │ ├── evaluation/ # Model evaluation
-│ │ ├── metrics.py # ROUGE, BLEU, and METEOR metrics
-│ │ ├── analysis.py # Error analysis and visualization
-│ │ └── reporting.py # Generate evaluation reports
+│ │ └── metrics.py # ROUGE, BLEU, and other metrics
 │ │
-│ ├── utils/ # Utility functions
-│ │ ├── logging.py # Structured logging with AWS integration
-│ │ ├── aws_utils.py # AWS-specific utilities (S3, SageMaker, etc.)
-│ │ └── gpu_utils.py # GPU resource management
-│ │
-│ └── cache/ # Cache for trained models
-│ │ ├── bart/ # Cached BART models
-│ │ ├── t5/ # Cached T5 models
-│ │ └── gpt/ # Cached GPT models
+│ └── utils/ # Utility functions
+│     ├── logging.py # Structured logging
+│     └── aws_utils.py # AWS-specific utilities
 │
 ├── configs/ # Configuration files
-│ ├── model_configs/ # Model-specific configurations
-│ ├── aws_configs/ # AWS deployment configurations
-│ └── prompt_configs/ # Prompt engineering configurations
+│ ├── model_configs/ # Model parameters
+│ └── aws_configs/ # AWS configurations
 │
 ├── tests/ # Unit and integration tests
-│ ├── test_data.py # Test data loading and preprocessing
-│ ├── test_models.py # Test summarization models
-│ └── test_evaluation.py # Test evaluation metrics
-│
 ├── scripts/ # Shell scripts for automation
-│ ├── train.sh # Train summarization models
-│ ├── evaluate.sh # Evaluate models
-│ └── deploy_aws.sh # Deploy models on AWS
-│
 ├── requirements.txt # Python dependencies
-├── Dockerfile # Docker configuration for containerization
-├── .gitignore # Files to ignore in version control
-├── .env # Environment variables
 └── README.md # Project documentation
 ```
 
-
 ## Code Style and Patterns
+
+### 1. Code Organization 🏗️
+- Write modular, single-responsibility components
+- Prefer pure functions over classes
+- Use dataclasses for structured and complex data
+- NEVER use dictionaries, tuples, or named tuples - always use dataclasses instead
+- Write the top-level function first, then implement helper functions
+
+```python
+from dataclasses import dataclass
+
+@dataclass
+class TokenSequence:
+    text: str
+    tokens: list[str]
+    attention_score: float = 0.0
+```
 
 ### General Patterns
 ```python
 # ✅ DO: Use type hints and dataclasses for structured data
 @dataclass
-class SummarizationConfig:
-    max_length: int
-    min_length: int
-    model_name: str
+class SummarizationResult:
+    summary: str
+    rouge_score: float
+    processing_time: float
     
-# ❌ DON'T: Use dictionaries for configuration
-config = {
-    "max_length": 512,
-    "min_length": 50
+# ❌ DON'T: Use dictionaries for results
+result = {
+    "summary": "The text summary...",
+    "rouge_score": 0.85,
+    "processing_time": 1.2
 }
 ```
 
 ### Naming Conventions
 - Models: `{type}_{purpose}_model` (e.g., `extractive_ranking_model`)
-- Configs: `{component}Config` (e.g., `TokenizerConfig`)
 - Functions: verb_noun format (e.g., `process_text`, `generate_summary`)
 - Parameters: descriptive nouns (e.g., `batch_size`, `learning_rate`)
 
 ### Function Patterns
 ```python
 # ✅ DO: Use descriptive type hints and docstrings
-def process_article(
+def process_text(
     text: str,
-    config: ProcessingConfig,
+    *,  # Force keyword arguments
+    max_length: int,
+    min_length: int,
     logger: Logger
-) -> ProcessedText:
+) -> ProcessedTextResult:
     """
-    Process article text for summarization.
+    Process input text for summarization.
     
     Args:
-        text: Raw article text
-        config: Processing configuration
-        logger: Logger instance
-    
+        text: Input text to process
+        max_length: Maximum length of processed text 
+        min_length: Minimum length of processed text
+        remove_stopwords: Whether to remove stopwords
+        language: Language code for processing
+        logger: Logger for tracking
+
     Returns:
-        ProcessedText object containing cleaned text
+        ProcessedTextResult containing the cleaned text
     """
     
-# ❌ DON'T: Use generic parameter names or skip documentation
-def process(text, cfg):
+# ❌ DON'T Use config objects or dictionaries for parameters. Always use explicit arguments.
+def process_text(text: str, config: ProcessingConfig) -> str:
     pass
-```
-
-## Project-Specific Patterns
-
-### Data Loading
-```python
-# ✅ DO: Use context managers and proper error handling
-def load_dataset(path: Path) -> Dataset:
-    try:
-        with open(path, 'r') as f:
-            # processing
-    except FileNotFoundError:
-        logger.error(f"Dataset not found: {path}")
-        raise
 ```
 
 ### Model Handling
 ```python
-# ✅ DO: Use proper model initialization pattern
-def initialize_model(config: ModelConfig) -> PreTrainedModel:
+# ✅ DO: Use explicit parameters
+def initialize_model(
+    model_name: str,
+    *,
+    device_map: str = "auto",
+    use_bfloat16: bool = True,
+    max_length: int = 512
+) -> PreTrainedModel:
     model = AutoModel.from_pretrained(
-        config.model_name,
-        device_map="auto",
-        torch_dtype=torch.bfloat16
+        model_name,
+        device_map=device_map,
+        torch_dtype=torch.bfloat16 if use_bfloat16 else torch.float32,
+        max_length=max_length
     )
     return model
 
-# ❌ DON'T: Hardcode model parameters
-model = AutoModel.from_pretrained("t5-base")
+# ❌ DON'T Use config objects. NEVER!
+def initialize_model(config: ModelConfig) -> PreTrainedModel:
+    pass
 ```
 
 ### Prompt Engineering
@@ -180,6 +169,23 @@ prompt = "Summarize: " + text + " Key points: " + key_points
 ```
 
 ## Common Components
+
+### Function Design Rules
+- One function = one task
+- Maximum 20 lines per function
+- Maximum 2 levels of nesting
+- Always use type hints
+- NEVER TAKE THE INPUTS AS A CONFIG OBJECT
+
+```python
+def calculate_gene_score(
+    gene_id: str,
+    expression_data: np.ndarray,
+    *,  # Force keyword arguments
+    threshold: float = 0.05,
+    logger: Logger
+) -> CalculateGeneScoreResult:
+```
 
 ### Data Processing
 ```python
@@ -202,29 +208,47 @@ def calculate_rouge(
     predictions: List[str],
     references: List[str],
     rouge_types: List[str] = ["rouge1", "rouge2", "rougeL"]
-) -> Dict[str, float]:
+) -> CalculateRougeResult:
     """Calculate ROUGE scores for predictions."""
 ```
 
 ### Logging Pattern
 ```python
-# ✅ DO: Use structured logging with AWS integration
+# ✅ DO: Create a centralized logger in utils/logging.py
+from typing import Any
 import logging
 import json
 
-logger = logging.getLogger("summarization")
-handler = logging.StreamHandler()
-formatter = logging.Formatter(json.dumps({"message": "%(message)s", "level": "%(levelname)s"}))
-handler.setFormatter(formatter)
-logger.addHandler(handler)
-logger.setLevel(logging.INFO)
+def get_logger(name: str = "summarization") -> logging.Logger:
+    """Get or create a logger with consistent configuration."""
+    logger = logging.getLogger(name)
+    
+    # Only add handler if logger doesn't have one
+    if not logger.handlers:
+        handler = logging.StreamHandler()
+        formatter = logging.Formatter(
+            json.dumps({
+                "message": "%(message)s",
+                "level": "%(levelname)s"
+            })
+        )
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+        logger.setLevel(logging.INFO)
+    
+    return logger
 
+# Usage in other files:
+from utils.logging import get_logger
+logger = get_logger()
 logger.info(json.dumps({
     "event": "batch_processing",
     "batch_size": len(batch),
     "memory_reserved": torch.cuda.memory_reserved()
 }))
 ```
+
+This approach ensures consistent logging configuration across all modules
 
 - Avoid multiple logging initialization in different modules to prevent duplicate logs.
 
@@ -272,6 +296,44 @@ def process_and_save(text):
 
 ## Documentation Requirements
 
+### Documentation for Non-Python Developers
+Documentation should be written assuming the reader has no Python experience:
+
+1. **Project Overview**
+   - Start with a high-level explanation of what the project does
+   - Provide real-world examples of use cases
+   - Include screenshots or diagrams when possible
+
+2. **Setup Guide**
+   - Step-by-step installation instructions
+   - Required third-party tools and accounts
+   - Common troubleshooting tips
+
+3. **API Documentation**
+   - Example requests and responses
+   - Clear explanations of input/output formats
+   - Error messages and their meanings
+
+### Function Documentation
+```python
+def group_genes(
+    expression_data: np.ndarray,
+    *,
+    min_size: int = 10,
+    logger: Logger
+) -> list[GeneGroup]:
+    """Group genes based on expression patterns.
+
+    Args:
+        expression_data: Gene expression matrix (genes × samples)
+        min_size: Minimum genes per group (default: 10)
+        logger: Logger instance for tracking
+
+    Returns:
+        List of GeneGroup objects
+    """
+```
+
 ### File Documentation
 At the top of each Python file, include a brief description of the file's purpose and contents.
 ```python
@@ -286,29 +348,6 @@ Functions:
 ```
 This is just an example... I will write the actual description when I see the code.
 
-### Function Documentation
-```python
-def fine_tune_model(
-    model: PreTrainedModel,
-    dataset: Dataset,
-    config: TrainingConfig
-) -> Tuple[PreTrainedModel, Dict[str, float]]:
-    """
-    Fine-tune a pre-trained model on the summarization dataset.
-    
-    Args:
-        model: The pre-trained model to fine-tune
-        dataset: Training dataset
-        config: Training configuration
-        
-    Returns:
-        Tuple of (fine-tuned model, training metrics)
-        
-    Raises:
-        OutOfMemoryError: If batch size is too large
-        ValueError: If dataset is empty
-    """
-```
 
 ### Class Documentation
 ```python
@@ -319,7 +358,6 @@ class SummarizationPipeline:
     Attributes:
         model: The underlying summarization model
         tokenizer: Tokenizer for text processing
-        config: Pipeline configuration
         
     Example:
         >>> pipeline = SummarizationPipeline(model_name="t5-base")

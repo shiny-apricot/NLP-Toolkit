@@ -35,29 +35,3 @@
 
 **Note:** All changes should be regularly committed to GitHub with descriptive messages.
 
-## Project Structure
-```
-src/
-├── data/
-│   ├── preprocessing/ # Text cleaning, tokenization
-│   └── loader/       # Dataset handling, batching
-├── extractive/
-│   ├── models/      # Extractive model implementations
-│   └── ranking/     # Sentence scoring algorithms
-├── abstractive/
-│   ├── models/      # LLM model handlers
-│   ├── prompts/     # Prompt templates and engineering
-│   └── fine_tuning/ # Fine-tuning scripts
-├── evaluation/
-│   ├── metrics/     # ROUGE and other metrics
-│   └── analysis/    # Error analysis, visualization
-└── utils/           # Shared utilities
-
-configs/
-├── model_configs/   # Model parameters
-├── aws_configs/     # AWS setup configurations
-└── prompt_configs/  # Prompt templates
-
-notebooks/           # Development and analysis notebooks
-```
-
