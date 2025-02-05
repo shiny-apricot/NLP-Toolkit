@@ -42,6 +42,9 @@ export TORCH_HOME="./cache"
 export TORCH_CPU_NUM_THREADS=8
 export AWS_DEFAULT_REGION=us-west-2
 
+# Add src to PYTHONPATH
+export PYTHONPATH="${PYTHONPATH}:${PWD}"
+
 # Configure memory monitoring
 echo "Setting up memory monitoring..."
 cat > ./scripts/monitor_memory.py << EOL
@@ -106,10 +109,10 @@ echo """
 Setup complete! 
 
 To run the pipeline:
-python scripts/run_aws_pipeline.py \\
+python src/pipelines/aws_pipeline.py \\
     --config configs/aws_configs/r5.2xlarge.yaml \\
     --dataset-split validation \\
-    --stop-instance stop
+    --stop-instance
 
 Memory monitoring log: logs/memory_profiles/memory_usage.jsonl
 Setup info: logs/setup_info.json
