@@ -23,6 +23,19 @@ export AWS_DEFAULT_REGION=us-west-2
 export TRANSFORMERS_CACHE="./cache"
 export TORCH_HOME="./cache"
 
+# Verify AWS permissions
+echo "Verifying AWS permissions..."
+aws sts get-caller-identity || {
+    echo "Error: AWS credentials not properly configured"
+    exit 1
+}
+
+# Verify EC2 permissions
+aws ec2 describe-instances --max-items 1 || {
+    echo "Error: Missing required EC2 permissions"
+    exit 1
+}
+
 # Download NLTK data
 python3 -c "import nltk; nltk.download('punkt'); nltk.download('averaged_perceptron_tagger')"
 

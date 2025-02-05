@@ -1,0 +1,70 @@
+instance_type: "r5.2xlarge"
+
+compute:
+  num_cpus: 8
+  memory_gb: 64
+  num_gpus: 0
+  cuda_visible_devices: ""
+  torch_num_threads: 8  # Utilize all CPU cores
+
+training:
+  batch_size: 16  # Can handle larger batches due to 64GB RAM
+  gradient_accumulation_steps: 4
+  fp16: false
+  num_workers: 6  # More workers for CPU processing
+  max_length: 1024  # Can handle longer sequences
+  cache_dir: "cache"
+  dataset_in_memory: true  # Keep dataset in RAM for faster processing
+
+model:
+  model_type: "bart"
+  model_name: "facebook/bart-base"
+  dtype: "float32"  # Standard precision for CPU
+  quantize: true  # Enable CPU quantization for better performance
+
+aws:
+  region: "us-west-2"
+  s3_bucket: "my-summarization-model-bucket"
+  sagemaker_role_arn: "arn:aws:iam::your-account-id:role/service-role/AmazonSageMaker-ExecutionRole"
+  cloudwatch:
+    log_group: "/aws/summarization/cpu-memory-optimized"
+    log_stream: "r5-training"
+  enable_spot: true  # Can use spot instances for cost savings
+
+logging:
+  level: "INFO"
+  log_dir: "./logs"
+  tensorboard_dir: "./logs/tensorboard"
+  cloudwatch_enabled: true
+  log_memory_usage: true  # Track memory usage
+
+monitoring:
+  enable_wandb: false
+  enable_memory_tracking: true
+  log_interval_steps: 50
+  cpu_usage_alerts: true
+  memory_threshold_percent: 80
+  memory_monitoring_interval: 60  # Monitor memory every 60 seconds
+  enable_cpu_profiling: true
+
+security:
+  enable_iam_auth: true
+  use_aws_ssm: true
+  ssm_parameter_path: "/summarization/memory-optimized/"
+  encrypt_outputs: true
+  enable_vpc_endpoints: true  # For better security
+
+development:
+  debug_mode: false
+  profile_code: true
+  disable_tqdm: true
+  enable_cpu_optimizations: true
+  torch_compile: true
+  parallel_processing:
+    enable: true
+    num_processes: 6  # Leave 2 cores for system
+  memory_optimization:
+    enable_memory_pinning: true  # Pin memory for faster access
+    garbage_collection_interval: 1000  # Batch intervals
+    clear_cache_interval: 5000
+    enable_torch_multiprocessing: true

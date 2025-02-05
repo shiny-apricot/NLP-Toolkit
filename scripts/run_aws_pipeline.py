@@ -10,6 +10,7 @@ from src.utils.project_logger import ProjectLogger
 from src.utils.aws_resource_manager import AWSResourceManager
 from src.utils.config_loader import load_instance_config
 from src.summarization_pretrained_pipeline import run_complete_pipeline
+from src.utils.aws_instance_manager import InstanceManager
 
 def setup_aws_environment(
     *,
@@ -46,6 +47,12 @@ def main():
     )
     parser.add_argument("--dataset-split", choices=["train", "validation", "test"], default="validation")
     parser.add_argument("--sample-size", type=int, default=None)
+    parser.add_argument(
+        "--stop-instance",
+        choices=['no', 'stop', 'terminate'],
+        default='no',
+        help="Whether to stop/terminate instance after completion"
+    )
     args = parser.parse_args()
 
     # Initialize logger with AWS-specific configuration
@@ -53,6 +60,10 @@ def main():
         name="aws_summarization",
         log_path=Path(f"logs/aws_run_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json")
     )
+    
+    instance_manager = None
+    if args.stop_instance != 'no':
+        instance_manager = InstanceManager(logger)
 
     try:
         # Setup AWS environment and resources using config
@@ -80,6 +91,17 @@ def main():
                 resource_usage=resource_manager.get_resource_usage(),
                 config=instance_config
             )
+
+            # After pipeline completion, handle instance stopping
+            if instance_manager:
+                logger.info("Pipeline completed, preparing to stop instance")
+                try:
+                    if args.stop_instance == 'stop':
+                        instance_manager.stop_instance()
+                    elif args.stop_instance == 'terminate':
+                        instance_manager.terminate_instance()
+                except Exception as e:
+                    logger.error(f"Failed to stop instance: {e}")
 
     except Exception as e:
         logger.error(f"Pipeline failed: {str(e)}")
