@@ -11,6 +11,7 @@ from src.utils.aws_resource_manager import AWSResourceManager
 from src.utils.config_loader import load_instance_config
 from src.summarization_pretrained_pipeline import run_complete_pipeline
 from src.utils.aws_instance_manager import InstanceManager
+from src.utils.memory_utils import MemoryTracker, optimize_memory
 
 def setup_aws_environment(
     *,
@@ -66,42 +67,46 @@ def main():
         instance_manager = InstanceManager(logger)
 
     try:
-        # Setup AWS environment and resources using config
-        resource_manager, instance_config = setup_aws_environment(
-            config_path=args.config,
-            logger=logger
-        )
-
-        with resource_manager:
-            # Run the pipeline with config parameters
-            results = run_complete_pipeline(
-                model_name=instance_config.model.model_name,
-                dataset_split=args.dataset_split,
-                sample_size=args.sample_size,
-                max_length=instance_config.training.max_length,
-                batch_size=instance_config.training.batch_size,
-                device="cuda" if torch.cuda.is_available() else "cpu",
+        with MemoryTracker(logger, "Pipeline Execution", log_path=Path("logs/memory_tracking.jsonl")):
+            # Setup AWS environment and resources using config
+            resource_manager, instance_config = setup_aws_environment(
+                config_path=args.config,
                 logger=logger
             )
 
-            # Log results to CloudWatch using config settings
-            logger.info(
-                "Pipeline completed successfully",
-                metrics=results.evaluation_metrics.to_dict(),
-                resource_usage=resource_manager.get_resource_usage(),
-                config=instance_config
-            )
+            with resource_manager:
+                # Run the pipeline with config parameters
+                results = run_complete_pipeline(
+                    model_name=instance_config.model.model_name,
+                    dataset_split=args.dataset_split,
+                    sample_size=args.sample_size,
+                    max_length=instance_config.training.max_length,
+                    batch_size=instance_config.training.batch_size,
+                    device="cuda" if torch.cuda.is_available() else "cpu",
+                    logger=logger
+                )
 
-            # After pipeline completion, handle instance stopping
-            if instance_manager:
-                logger.info("Pipeline completed, preparing to stop instance")
-                try:
-                    if args.stop_instance == 'stop':
-                        instance_manager.stop_instance()
-                    elif args.stop_instance == 'terminate':
-                        instance_manager.terminate_instance()
-                except Exception as e:
-                    logger.error(f"Failed to stop instance: {e}")
+                # Optimize memory after major operations
+                optimize_memory(logger=logger)
+
+                # Log results to CloudWatch using config settings
+                logger.info(
+                    "Pipeline completed successfully",
+                    metrics=results.evaluation_metrics.to_dict(),
+                    resource_usage=resource_manager.get_resource_usage(),
+                    config=instance_config
+                )
+
+                # After pipeline completion, handle instance stopping
+                if instance_manager:
+                    logger.info("Pipeline completed, preparing to stop instance")
+                    try:
+                        if args.stop_instance == 'stop':
+                            instance_manager.stop_instance()
+                        elif args.stop_instance == 'terminate':
+                            instance_manager.terminate_instance()
+                    except Exception as e:
+                        logger.error(f"Failed to stop instance: {e}")
 
     except Exception as e:
         logger.error(f"Pipeline failed: {str(e)}")

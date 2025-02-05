@@ -18,12 +18,13 @@ source summarization-env/bin/activate
 pip install --upgrade pip
 pip install --no-cache-dir -r requirements.txt
 
-# Install additional memory optimization packages
+# Install memory monitoring tools
 pip install --no-cache-dir \
-    torch-memory-utils \
     psutil \
     memory_profiler \
-    py-spy
+    py-spy \
+    numpy \
+    torch>=2.0.0  # Ensure we have latest PyTorch with memory optimizations
 
 # Create directories with appropriate permissions
 mkdir -p logs/memory_profiles
