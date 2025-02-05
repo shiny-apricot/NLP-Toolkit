@@ -22,7 +22,7 @@ model:
 
 aws:
   region: "us-west-2"
-  s3_bucket: "your-model-bucket"
+  s3_bucket: "my-summarization-model-bucket "
   sagemaker_role_arn: "arn:aws:iam::your-account-id:role/service-role/AmazonSageMaker-ExecutionRole"
   cloudwatch:
     log_group: "/aws/summarization"

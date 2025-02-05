@@ -68,6 +68,7 @@ summarization_project/
 - Use dataclasses for structured and complex data
 - NEVER use dictionaries, tuples, or named tuples - always use dataclasses instead
 - Write the top-level function first, then implement helper functions
+- DO NOT create classes for functionality, try to define functions and new files instead
 
 ```python
 from dataclasses import dataclass
@@ -80,6 +81,14 @@ class TokenSequence:
 ```
 
 ### General Patterns
+
+#### Code Organization and File Splitting
+- Split files that exceed 300 lines of code
+- Create new modules when a file handles multiple concerns
+- Keep each Python module focused on a single responsibility
+- Use meaningful directory names for new modules
+
+### Output Handling
 ```python
 # ✅ DO: Use type hints and dataclasses for structured data
 @dataclass
@@ -97,9 +106,12 @@ result = {
 ```
 
 ### Naming Conventions
-- Models: `{type}_{purpose}_model` (e.g., `extractive_ranking_model`)
-- Functions: verb_noun format (e.g., `process_text`, `generate_summary`)
-- Parameters: descriptive nouns (e.g., `batch_size`, `learning_rate`)
+- Models: `{task}_{architecture}_{purpose}_model` (e.g., `text_transformer_extractive_ranking_model`, `summarization_t5_abstractive_model`)
+- Functions: detailed_verb_specific_noun format (e.g., `process_input_text_for_summarization`, `generate_abstractive_summary`, `calculate_rouge_metrics`)
+- Parameters: descriptive_detailed_nouns (e.g., `maximum_sequence_length`, `initial_learning_rate`, `batch_size_per_gpu`)
+- Variables: descriptive_purpose_type (e.g., `preprocessed_input_text`, `rouge_evaluation_score`, `model_checkpoint_path`)
+- Classes: detailed_purpose_component (e.g., `AbstractiveSummarizationPipeline`, `TextPreprocessingManager`, `ModelCheckpointHandler`)
+
 
 ### Function Patterns
 ```python
@@ -169,6 +181,7 @@ prompt = "Summarize: " + text + " Key points: " + key_points
 ```
 
 ## Common Components
+
 
 ### Function Design Rules
 - One function = one task

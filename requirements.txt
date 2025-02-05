@@ -48,6 +48,9 @@ pytest-cov
 sphinx
 sphinx-rtd-theme
 
+# Other
+gitpython # check if true
+
 # Optional Dependencies
 # Uncomment if needed
 # deepspeed  # For distributed training

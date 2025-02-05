@@ -1,335 +1,264 @@
-"""
-Summarization Pipeline for Text Processing
+"""Text Summarization Pipeline using Pre-trained Models"""
 
-This module provides tools to automatically create summaries from long texts using AI.
-Think of it as an intelligent assistant that reads long articles and writes shorter versions.
-
-Key Features:
-- Processes both single texts and multiple texts at once
-- Automatically manages computer memory and GPU resources
-- Provides detailed metrics about the summary quality
-- Handles errors gracefully with clear error messages
-
-Example Usage:
-    # Create a summarization tool
-    pipeline = SummarizationPipeline("g4dn.xlarge")
-    
-    # Summarize a single article
-    result = pipeline.summarize("Your long article text here...")
-    print(result.summary)
-    
-    # Summarize multiple articles at once
-    results = pipeline.summarize([
-        "First article text...",
-        "Second article text..."
-    ])
-"""
-
+from typing import List, Tuple, Union, Optional, Literal
 from dataclasses import dataclass
-from typing import List, Optional, Union
 from pathlib import Path
-import time
-import torch
-from transformers import AutoModelForSeq2SeqLM, AutoTokenizer, PreTrainedModel, PreTrainedTokenizer
 
-from src.utils.project_logger import get_logger, ProjectLogger
-from src.utils.gpu_utils import GPUManager, GPUConfig
-from src.utils.aws_utils import AWSModelStorage
-from src.evaluation.metrics import SummarizationMetrics
-from src.config_loader import ConfigLoader, InstanceConfig
+from transformers import AutoModelForSeq2SeqGeneration, AutoTokenizer
+import torch
+
+from src.utils.project_logger import ProjectLogger
+from src.utils.device_utils import setup_compute_device
+from src.models.inference.inference_manager import InferenceManager
+from src.models.inference.inference_dataclass import InferenceResult
+from src.data.cnn_daily_dataset import load_cnn_daily_dataset
+from src.validation.dataset_validator import ValidationMetrics, validate_dataset_split
+from src.evaluation.summary_metrics import EvaluationMetrics, calculate_metrics
+import numpy as np
+
 
 @dataclass
-class SummarizationOutput:
-    summary: str
-    original_length: int
+class SummarizationResult:
+    """The result of summarizing a text."""
+    summary_text: str
+    original_text_length: int
     summary_length: int
-    processing_time_ms: float
-    metrics: Optional[dict] = None
+    processing_duration_ms: float
+    input_token_count: int
 
-class TokenLengthError(Exception):
-    """Raised when input text exceeds model's maximum token length."""
-    pass
+    @property
+    def compression_ratio(self) -> float:
+        """Calculate the compression ratio of the summary."""
+        return self.summary_length / self.original_text_length if self.original_text_length > 0 else 0.0
 
-class SummarizationPipeline:
-    def __init__(
-        self,
-        instance_type: str,
-        *,
-        config_dir: str = "configs/aws_configs",
-        device_map: Union[str, dict] = "auto",
-        s3_bucket: Optional[str] = None,
-        aws_region: Optional[str] = None
-    ) -> None:
-        """Initialize summarization pipeline."""
-        # Initialize logger with explicit name and optional CloudWatch config
-        self.logger = get_logger(
-            "summarization-pipeline",
-            level="INFO",
-            cloudwatch_group="/aws/summarization" if s3_bucket else None,
-            cloudwatch_stream=f"instance-{instance_type}",
-            aws_region=aws_region
+
+@dataclass
+class PipelineResults:
+    """Results from running the complete pipeline."""
+    validation_metrics: ValidationMetrics
+    evaluation_metrics: EvaluationMetrics
+    sample_predictions: List[Tuple[str, str, str]]  # [(article, reference, prediction)]
+    processing_info: dict
+
+
+@dataclass
+class DatasetSplits:
+    """Container for dataset splits."""
+    train: Optional[List] = None
+    validation: Optional[List] = None
+    test: Optional[List] = None
+    split_ratios: Tuple[float, float, float] = (0.7, 0.15, 0.15)
+
+
+def generate_summary(
+    input_text: Union[str, List[str]],
+    model_name: str,
+    *,
+    max_length: int = 512,
+    min_length: int = 50,
+    num_beams: int = 4,
+    length_penalty: float = 1.0,
+    early_stopping: bool = True,
+    batch_size: int = 8,
+    device: str = "auto",
+    logger: ProjectLogger
+) -> Union[SummarizationResult, List[SummarizationResult]]:
+    """Create a summary of the input text(s) using the specified model.
+    
+    Args:
+        input_text: Single text string or list of texts to summarize
+        model_name: Name of the pre-trained model to use
+        max_length: Maximum length of generated summary
+        min_length: Minimum length of generated summary
+        num_beams: Number of beams for beam search
+        length_penalty: Length penalty for generation
+        early_stopping: Whether to stop early in beam search
+        batch_size: Number of texts to process at once
+        device: Computing device to use ("cpu", "cuda", or "auto")
+        logger: Logger instance for tracking
+
+    Returns:
+        Single SummarizationResult or list of results
+    """
+    if min_length >= max_length:
+        raise ValueError("min_length must be less than max_length")
+
+    # Convert input to list
+    is_single = isinstance(input_text, str)
+    texts = [input_text] if is_single else input_text
+
+    # Setup device and load model
+    device = setup_compute_device(device)
+    model = AutoModelForSeq2SeqGeneration.from_pretrained(model_name).to(device)
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+
+    # Initialize inference manager
+    inference_mgr = InferenceManager(model, tokenizer, device)
+
+    try:
+        # Process all texts in batches
+        inference_results = inference_mgr.process_batch(
+            texts,
+            max_length=max_length,
+            min_length=min_length,
+            num_beams=num_beams,
+            length_penalty=length_penalty,
+            early_stopping=early_stopping
         )
-        
-        # Log initialization
-        self.logger.info(
-            "Initializing summarization pipeline",
-            instance_type=instance_type,
-            s3_bucket=s3_bucket,
-            aws_region=aws_region
-        )
-        
-        # Select device first
-        self.device = self._select_device(device_map)
-        
-        # Initialize AWS storage if bucket provided
-        self.aws_storage = None
-        if s3_bucket and aws_region:
-            self.aws_storage = AWSModelStorage(
-                bucket=s3_bucket,
-                region=aws_region,
-                logger=self.logger
+
+        # Convert to SummarizationResults
+        results = [
+            SummarizationResult(
+                summary_text=result.output_text,
+                original_text_length=result.input_length,
+                summary_length=result.output_length,
+                processing_duration_ms=result.processing_duration_ms,
+                input_token_count=result.input_token_count
             )
-        
-        # Load instance configuration
-        config_loader = ConfigLoader(config_dir)
-        self.config = config_loader.load_instance_config(instance_type)
-        
-        # Initialize GPU manager with config values
-        gpu_config = GPUConfig(
-            min_memory_mb=self.config.memory_gb * 1024,
-            max_memory_percent=0.9,
-            strategy="data_parallel",
-            prefer_bfloat16=self.config.fp16
+            for result in inference_results
+        ]
+
+        logger.info(
+            "Summarization completed",
+            processed=len(results),
+            avg_compression=sum(r.compression_ratio for r in results) / len(results)
         )
-        self.gpu_manager = GPUManager(gpu_config, self.logger)
+
+        return results[0] if is_single else results
+
+    except Exception as e:
+        logger.error(f"Summarization failed: {str(e)}")
+        raise
+    finally:
+        # Clean up CUDA memory
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+
+def run_complete_pipeline(
+    model_name: str,
+    *,
+    dataset_split: Literal["train", "validation", "test"] = "validation",
+    split_ratios: Tuple[float, float, float] = (0.7, 0.15, 0.15),
+    sample_size: Optional[int] = 100,
+    max_length: int = 512,
+    min_length: int = 50,
+    num_beams: int = 4,
+    device: str = "auto",
+    logger: ProjectLogger
+) -> PipelineResults:
+    """Run complete summarization pipeline including dataset loading, validation, and evaluation.
+    
+    Args:
+        model_name: Name of the pre-trained model to use
+        dataset_split: Which dataset split to use ("train", "validation", or "test")
+        split_ratios: Tuple of (train, validation, test) ratios that sum to 1.0
+        sample_size: Number of articles to process (None for all)
+        max_length: Maximum length of generated summary
+        min_length: Minimum length of generated summary
+        num_beams: Number of beams for beam search
+        device: Computing device to use
+        logger: Logger instance
+    """
+    # Validate split ratios
+    if sum(split_ratios) != 1.0:
+        raise ValueError("Split ratios must sum to 1.0")
+
+    # Load and split dataset
+    logger.info("Loading and splitting dataset")
+    full_dataset = load_cnn_daily_dataset(split="train")  # Load full dataset
+    
+    # Randomly shuffle and split dataset
+    dataset_size = len(full_dataset.articles)
+    indices = np.random.permutation(dataset_size)
+    
+    train_end = int(dataset_size * split_ratios[0])
+    val_end = train_end + int(dataset_size * split_ratios[1])
+    
+    splits = DatasetSplits(
+        train=full_dataset.articles[indices[:train_end]],
+        validation=full_dataset.articles[indices[train_end:val_end]],
+        test=full_dataset.articles[indices[val_end:]]
+    )
+    
+    # Select appropriate split
+    if dataset_split == "train":
+        current_split = splits.train
+    elif dataset_split == "validation":
+        current_split = splits.validation
+    else:  # test
+        current_split = splits.test
         
-        self.max_length = self.config.max_length
-        self.min_length = max(50, self.max_length // 4)  # sensible default
-        
-        # Initialize metrics calculator
-        self.metrics = SummarizationMetrics(
-            rouge_types=["rouge1", "rouge2", "rougeL"],
-            use_stemming=True,
-            device=self.device,
-            logger=self.logger
+    # Apply sample size if specified
+    if sample_size:
+        current_split = current_split[:sample_size]
+    
+    # Validate dataset
+    logger.info(f"Validating {dataset_split} split")
+    validation_metrics = validate_dataset_split(current_split)
+    
+    # Generate summaries
+    logger.info(f"Generating summaries for {dataset_split} split")
+    summaries = generate_summary(
+        [article.article for article in current_split],
+        model_name=model_name,
+        max_length=max_length,
+        min_length=min_length,
+        num_beams=num_beams,
+        device=device,
+        logger=logger
+    )
+    
+    # Calculate metrics
+    logger.info("Calculating evaluation metrics")
+    evaluation_metrics = calculate_metrics(
+        predictions=[s.summary_text for s in summaries],
+        references=[article.highlights for article in current_split],
+        processing_times=[s.processing_duration_ms for s in summaries]
+    )
+    
+    # Sample some results for inspection
+    sample_idx = min(3, len(summaries))
+    sample_predictions = [
+        (current_split[i].article,
+         current_split[i].highlights,
+         summaries[i].summary_text)
+        for i in range(sample_idx)
+    ]
+    
+    processing_info = {
+        "total_articles": len(current_split),
+        "average_processing_time": np.mean([s.processing_duration_ms for s in summaries]),
+        "model_name": model_name,
+        "device": device
+    }
+    
+    return PipelineResults(
+        validation_metrics=validation_metrics,
+        evaluation_metrics=evaluation_metrics,
+        sample_predictions=sample_predictions,
+        processing_info=processing_info
+    )
+
+# Example usage:
+if __name__ == "__main__":
+    logger = ProjectLogger("summarization_pipeline")
+    
+    # Run preliminary test with small sample from validation set
+    test_results = run_complete_pipeline(
+        model_name="facebook/bart-large-cnn",
+        dataset_split="validation",
+        sample_size=10,
+        split_ratios=(0.7, 0.15, 0.15),
+        logger=logger
+    )
+    
+    # If preliminary test successful, run on test set
+    if test_results.evaluation_metrics.rouge_scores['rouge1'] > 0.3:
+        test_results = run_complete_pipeline(
+            model_name="facebook/bart-large-cnn",
+            dataset_split="test",
+            sample_size=None,
+            split_ratios=(0.7, 0.15, 0.15),
+            logger=logger
         )
-        
-        # Initialize model and tokenizer
-        self.model, self.tokenizer = self._initialize_model()
-
-    def _select_device(self, device_map: Union[str, dict]) -> torch.device:
-        """Select appropriate device based on configuration."""
-        try:
-            if isinstance(device_map, str) and device_map != "auto":
-                return torch.device(device_map)
-            
-            device = self.gpu_manager.select_device()
-            self.logger.info("Device selected", device=str(device))
-            return device
-            
-        except Exception as e:
-            self.logger.warning(
-                "Device selection failed, falling back to CPU",
-                error=str(e)
-            )
-            return torch.device("cpu")
-
-    def _initialize_model(self) -> tuple[PreTrainedModel, PreTrainedTokenizer]:
-        """Initialize the pre-trained model and tokenizer."""
-        dtype = (
-            torch.bfloat16 if self.config.dtype == "bfloat16"
-            else torch.float16 if self.config.dtype == "float16"
-            else torch.float32
-        )
-        
-        try:
-            # Try loading from AWS first if available
-            if self.aws_storage:
-                try:
-                    model, tokenizer, _ = self.aws_storage.load_model(
-                        model_name=self.config.model_name,
-                        version="latest",
-                        use_bfloat16=(self.config.dtype == "bfloat16")
-                    )
-                    model = model.to(self.device)
-                    return model, tokenizer
-                except Exception as e:
-                    self.logger.warning(f"Failed to load from S3: {e}")
-            
-            # Fall back to loading from HuggingFace
-            model = AutoModelForSeq2SeqLM.from_pretrained(
-                self.config.model_name,
-                torch_dtype=dtype,
-                cache_dir=self.config.cache_dir
-            ).to(self.device)
-            
-            tokenizer = AutoTokenizer.from_pretrained(
-                self.config.model_name,
-                cache_dir=self.config.cache_dir
-            )
-            
-            return model, tokenizer
-            
-        except Exception as e:
-            self.logger.error(f"Failed to load model: {e}")
-            raise RuntimeError(f"Model initialization failed: {e}")
-
-    def summarize(
-        self,
-        text: Union[str, List[str]],
-        *,
-        max_length: Optional[int] = None,
-        min_length: Optional[int] = None,
-        num_beams: int = 4,
-        calculate_metrics: bool = True,
-        reference_text: Optional[Union[str, List[str]]] = None
-    ) -> Union[SummarizationOutput, List[SummarizationOutput]]:
-        """
-        Create a shorter version of your text(s).
-
-        Think of this as asking an intelligent assistant to read and summarize
-        one or more articles while keeping the most important points.
-
-        Args:
-            text: The article(s) you want to summarize. Can be one text or a list of texts.
-            max_length: Maximum words in the summary (optional)
-            min_length: Minimum words in the summary (optional)
-            num_beams: How thorough the AI should be (higher = better but slower)
-            calculate_metrics: Whether to measure summary quality
-            reference_text: Original text(s) to compare summary quality against
-
-        Returns:
-            A summary result containing:
-            - The generated summary
-            - Length of original and summary
-            - Processing time
-            - Quality metrics (if requested)
-
-        Example:
-            # Summarize one article
-            result = pipeline.summarize("Long article text...")
-            print(result.summary)
-
-            # Summarize multiple articles
-            results = pipeline.summarize([
-                "First article...",
-                "Second article..."
-            ])
-            for r in results:
-                print(r.summary)
-
-        Common Issues:
-            - If text is too long, you'll get a TokenLengthError
-            - If processing multiple texts, make sure you have enough memory
-            - For best results, clean your text of special characters first
-        """
-        is_batch = isinstance(text, list)
-        texts = text if is_batch else [text]
-        references = reference_text if isinstance(reference_text, list) else [reference_text] if reference_text else None
-        
-        max_length = max_length or self.max_length
-        min_length = min_length or self.min_length
-
-        start_time = time.perf_counter()
-        results = []
-        
-        try:
-            with torch.no_grad():
-                inputs = self.tokenizer(
-                    texts,
-                    return_tensors="pt",
-                    truncation=True,
-                    padding=True,
-                    max_length=self.tokenizer.model_max_length
-                ).to(self.device)
-
-                if inputs["input_ids"].shape[1] > self.tokenizer.model_max_length:
-                    raise TokenLengthError(
-                        f"Input length {inputs['input_ids'].shape[1]} exceeds "
-                        f"maximum length {self.tokenizer.model_max_length}"
-                    )
-                
-                with torch.cuda.amp.autocast(enabled=self.device.type == "cuda"):
-                    outputs = self.model.generate(
-                        **inputs,
-                        max_length=max_length,
-                        min_length=min_length,
-                        num_beams=num_beams,
-                        early_stopping=True
-                    )
-
-                summaries = self.tokenizer.batch_decode(
-                    outputs,
-                    skip_special_tokens=True
-                )
-                
-                for idx, summary in enumerate(summaries):
-                    metrics_dict = None
-                    if calculate_metrics and references and references[idx]:
-                        metrics_start = time.perf_counter()
-                        metrics_dict = self.metrics.calculate_metrics(
-                            summary, 
-                            references[idx]
-                        )
-                        metrics_time = (time.perf_counter() - metrics_start) * 1000
-                        self.logger.debug(f"Metrics calculation took {metrics_time:.2f}ms")
-                    
-                    results.append(SummarizationOutput(
-                        summary=summary,
-                        original_length=len(texts[idx]),
-                        summary_length=len(summary),
-                        processing_time_ms=(time.perf_counter() - start_time) * 1000,
-                        metrics=metrics_dict
-                    ))
-
-        except Exception as e:
-            self.logger.error(f"Summarization failed: {e}")
-            raise
-
-        return results[0] if not is_batch else results
-
-    def save_model(
-        self,
-        path: Optional[Path] = None,
-        version: str = "latest",
-        metadata: Optional[dict] = None
-    ) -> None:
-        """
-        Save model and tokenizer locally or to S3.
-        
-        Args:
-            path: Optional local path to save model
-            version: Version string for S3 storage
-            metadata: Optional metadata about the model
-        """
-        if self.aws_storage:
-            try:
-                self.aws_storage.save_model(
-                    model=self.model,
-                    tokenizer=self.tokenizer,
-                    model_name=self.config.model_name,
-                    version=version,
-                    metadata=metadata,
-                    local_path=path
-                )
-                return
-            except Exception as e:
-                self.logger.warning(f"Failed to save to S3, falling back to local save: {e}")
-        
-        if path:
-            self.model.save_pretrained(path)
-            self.tokenizer.save_pretrained(path)
-        else:
-            self.logger.warning("No path provided and S3 storage failed - model not saved")
-
-    def __enter__(self) -> 'SummarizationPipeline':
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
-        """Clean up resources."""
-        if hasattr(self, 'model'):
-            self.model.cpu()  # Move model to CPU to free GPU memory
-            del self.model
-        if hasattr(self, 'tokenizer'):
-            del self.tokenizer
-        torch.cuda.empty_cache()  # Clear CUDA cache
