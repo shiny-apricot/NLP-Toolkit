@@ -4,6 +4,7 @@ from typing import List, Optional, Any
 import time
 import torch
 from transformers import PreTrainedModel, PreTrainedTokenizer
+from ...utils.gpu_manager import GPUManager, GPUConfig
 
 from .inference_dataclasses import (
     ProcessingResult,
@@ -12,75 +13,84 @@ from .inference_dataclasses import (
 )
 from .processor import process_input_texts, decode_outputs
 
+@dataclass
+class InferenceResult:
+    """Result from model inference."""
+    output_text: str
+    input_length: int
+    output_length: int
+    processing_duration_ms: float
+    input_token_count: int
+
 class InferenceManager:
-    """Handles batch inference for transformer models."""
+    """Manages model inference with resource cleanup."""
     
     def __init__(
         self,
         model: PreTrainedModel,
         tokenizer: PreTrainedTokenizer,
-        device: torch.device
-    ) -> None:
+        device: str
+    ):
         self.model = model
         self.tokenizer = tokenizer
         self.device = device
-        self.model.eval()  # Ensure model is in evaluation mode
+        self.gpu_config = GPUConfig(
+            min_memory_mb=8 * 1024,
+            max_memory_percent=0.9,
+            strategy="data_parallel",
+            prefer_bfloat16=True
+        )
 
     def process_batch(
         self,
         texts: List[str],
-        *,  # Force keyword arguments
+        *,
         max_length: int,
-        min_length: Optional[int] = None,
-        num_beams: int = 1,
-        length_penalty: float = 1.0,
-        early_stopping: bool = False,
-        extra_params: dict[str, Any] = None
+        min_length: int,
+        num_beams: int,
+        length_penalty: float,
+        early_stopping: bool
     ) -> List[InferenceResult]:
-        """Process a batch of texts through the model."""
-        try:
-            # Process inputs
-            processed = process_input_texts(
-                texts, 
-                self.tokenizer,
-                max_length=max_length,
-                device=self.device
-            )
-            
-            # Run model inference
-            with torch.no_grad():
-                start_time = time.perf_counter()
+        results = []
+        
+        with GPUManager(self.gpu_config):
+            for text in texts:
+                start_time = torch.cuda.Event(enable_timing=True)
+                end_time = torch.cuda.Event(enable_timing=True)
                 
+                inputs = self.tokenizer(
+                    text,
+                    truncation=True,
+                    max_length=max_length,
+                    return_tensors="pt"
+                ).to(self.device)
+                
+                start_time.record()
                 outputs = self.model.generate(
-                    processed.input_ids,
-                    attention_mask=processed.attention_mask,
+                    inputs["input_ids"],
                     max_length=max_length,
                     min_length=min_length,
                     num_beams=num_beams,
                     length_penalty=length_penalty,
-                    early_stopping=early_stopping,
-                    **(extra_params or {})
+                    early_stopping=early_stopping
+                )
+                end_time.record()
+                torch.cuda.synchronize()
+                
+                summary = self.tokenizer.decode(
+                    outputs[0],
+                    skip_special_tokens=True
                 )
                 
-                processing_time = (time.perf_counter() - start_time) * 1000  # Convert to ms
-            
-            # Decode outputs
-            decoded_outputs = decode_outputs(outputs, self.tokenizer)
-            
-            # Create results
-            return [
-                InferenceResult(
-                    output_text=output,
+                results.append(InferenceResult(
+                    output_text=summary,
                     input_length=len(text.split()),
-                    output_length=len(output.split()),
-                    processing_duration_ms=processing_time / len(texts),
-                    input_token_count=len(self.tokenizer.encode(text))
-                )
-                for text, output in zip(texts, decoded_outputs)
-            ]
-
-        except Exception as e:
-            raise RuntimeError(f"Batch inference failed: {str(e)}") from e
+                    output_length=len(summary.split()),
+                    processing_duration_ms=start_time.elapsed_time(end_time),
+                    input_token_count=len(inputs["input_ids"][0])
+                ))
+                
+        return results
 
     def __enter__(self):
         """Context manager entry."""

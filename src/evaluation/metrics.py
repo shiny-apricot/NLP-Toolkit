@@ -1,4 +1,5 @@
-from typing import List, Dict, Union, Optional
+from dataclasses import dataclass
+from typing import List, Dict, Optional
 import torch
 from rouge_score import rouge_scorer
 from nltk.translate.bleu_score import sentence_bleu, SmoothingFunction
@@ -9,156 +10,91 @@ from concurrent.futures import ThreadPoolExecutor
 import nltk
 from tqdm import tqdm
 
-class SummarizationMetrics:
-    """Calculate various metrics for summarization evaluation."""
-    
-    def __init__(
-        self,
-        *,
-        rouge_types: List[str] = None,
-        use_stemming: bool = True,
-        batch_size: int = 32,
-        num_workers: int = 4,
-        device: str = "cuda" if torch.cuda.is_available() else "cpu",
-        logger: Optional[logging.Logger] = None
-    ):
-        self.rouge_types = rouge_types or ["rouge1", "rouge2", "rougeL"]
-        self.use_stemming = use_stemming
-        self.batch_size = batch_size
-        self.num_workers = num_workers
-        self.device = device
-        self.logger = logger or logging.getLogger(__name__)
-        
-        # Initialize ROUGE scorer
-        self.rouge_scorer = rouge_scorer.RougeScorer(
-            self.rouge_types,
-            use_stemmer=use_stemming
-        )
-        
-        # Download required NLTK data
-        try:
-            nltk.download('punkt')
-            nltk.download('wordnet')
-            nltk.download('omw-1.4')
-        except Exception as e:
-            self.logger.warning(f"Failed to download NLTK data: {str(e)}")
+@dataclass
+class MetricsResult:
+    rouge_scores: Dict[str, float]
+    bleu_score: float
+    meteor_score: float
+    mean_scores: Dict[str, float]
 
-    def calculate_rouge(
-        self,
-        prediction: str,
-        reference: str
-    ) -> Dict[str, float]:
-        """Calculate ROUGE scores for a single prediction."""
-        try:
-            scores = self.rouge_scorer.score(reference, prediction)
-            return {
-                key: value.fmeasure
-                for key, value in scores.items()
-            }
-        except Exception as e:
-            self.logger.error(f"ROUGE calculation failed: {str(e)}")
-            return {key: 0.0 for key in self.rouge_types}
+def calculate_rouge_scores(
+    predictions: List[str],
+    references: List[str],
+    *,
+    rouge_types: List[str] = None,
+    use_stemming: bool = True
+) -> Dict[str, float]:
+    """Calculate ROUGE scores for a list of predictions."""
+    rouge_types = rouge_types or ["rouge1", "rouge2", "rougeL"]
+    rouge_scorer = rouge_scorer.RougeScorer(rouge_types, use_stemmer=use_stemming)
+    scores = {rouge_type: [] for rouge_type in rouge_types}
 
-    def calculate_bleu(
-        self,
-        prediction: str,
-        reference: str
-    ) -> float:
-        """Calculate BLEU score for a single prediction."""
-        try:
-            smoothing = SmoothingFunction().method1
-            prediction_tokens = nltk.word_tokenize(prediction.lower())
-            reference_tokens = [nltk.word_tokenize(reference.lower())]
-            return sentence_bleu(reference_tokens, prediction_tokens, smoothing_function=smoothing)
-        except Exception as e:
-            self.logger.error(f"BLEU calculation failed: {str(e)}")
-            return 0.0
+    for prediction, reference in zip(predictions, references):
+        score = rouge_scorer.score(reference, prediction)
+        for rouge_type in rouge_types:
+            scores[rouge_type].append(score[rouge_type].fmeasure)
 
-    def calculate_meteor(
-        self,
-        prediction: str,
-        reference: str
-    ) -> float:
-        """Calculate METEOR score for a single prediction."""
-        try:
-            return meteor_score([reference], prediction)
-        except Exception as e:
-            self.logger.error(f"METEOR calculation failed: {str(e)}")
-            return 0.0
+    return {rouge_type: np.mean(values) for rouge_type, values in scores.items()}
 
-    def calculate_metrics(
-        self,
-        prediction: str,
-        reference: str
-    ) -> Dict[str, float]:
-        """Calculate all metrics for a single prediction."""
-        metrics = {}
-        
-        # Calculate ROUGE scores
-        rouge_scores = self.calculate_rouge(prediction, reference)
-        metrics.update(rouge_scores)
-        
-        # Calculate BLEU score
-        metrics['bleu'] = self.calculate_bleu(prediction, reference)
-        
-        # Calculate METEOR score
-        metrics['meteor'] = self.calculate_meteor(prediction, reference)
-        
-        return metrics
+def calculate_bleu_score(predictions: List[str], references: List[str]) -> float:
+    """Calculate BLEU score for a list of predictions."""
+    smoothing = SmoothingFunction().method1
+    bleu_scores = []
 
-    def batch_calculate_metrics(
-        self,
-        predictions: List[str],
-        references: List[str]
-    ) -> Dict[str, List[float]]:
-        """Calculate metrics for a batch of predictions."""
-        if len(predictions) != len(references):
-            raise ValueError("Number of predictions and references must match")
+    for prediction, reference in zip(predictions, references):
+        prediction_tokens = nltk.word_tokenize(prediction.lower())
+        reference_tokens = [nltk.word_tokenize(reference.lower())]
+        bleu_scores.append(sentence_bleu(reference_tokens, prediction_tokens, smoothing_function=smoothing))
 
-        batch_metrics: Dict[str, List[float]] = {
-            metric: [] for metric in self.rouge_types + ['bleu', 'meteor']
-        }
+    return np.mean(bleu_scores)
 
-        # Process in parallel using ThreadPoolExecutor
-        with ThreadPoolExecutor(max_workers=self.num_workers) as executor:
-            future_metrics = [
-                executor.submit(self.calculate_metrics, pred, ref)
-                for pred, ref in zip(predictions, references)
-            ]
-            
-            # Collect results with progress bar
-            for future in tqdm(future_metrics, desc="Calculating metrics"):
-                metrics = future.result()
-                for metric_name, score in metrics.items():
-                    batch_metrics[metric_name].append(score)
+def calculate_meteor_score(predictions: List[str], references: List[str]) -> float:
+    """Calculate METEOR score for a list of predictions."""
+    meteor_scores = []
 
-        # Calculate mean scores
-        mean_metrics = {
-            f"mean_{key}": np.mean(values)
-            for key, values in batch_metrics.items()
-        }
-        
-        # Calculate standard deviation
-        std_metrics = {
-            f"std_{key}": np.std(values)
-            for key, values in batch_metrics.items()
-        }
-        
-        return {
-            "individual": batch_metrics,
-            "mean": mean_metrics,
-            "std": std_metrics
-        }
+    for prediction, reference in zip(predictions, references):
+        meteor_scores.append(meteor_score([reference], prediction))
 
-    def __call__(
-        self,
-        predictions: Union[str, List[str]],
-        references: Union[str, List[str]]
-    ) -> Dict[str, Union[float, List[float]]]:
-        """Calculate metrics for single or batch predictions."""
-        if isinstance(predictions, str) and isinstance(references, str):
-            return self.calculate_metrics(predictions, references)
-        elif isinstance(predictions, list) and isinstance(references, list):
-            return self.batch_calculate_metrics(predictions, references)
-        else:
-            raise ValueError("Predictions and references must both be strings or both be lists")
+    return np.mean(meteor_scores)
+
+def calculate_summarization_metrics(
+    predictions: List[str],
+    references: List[str],
+    *,  # Force keyword arguments
+    rouge_types: List[str] = None,
+    use_stemming: bool = True,
+    batch_size: int = 32,
+    device: str = "cuda" if torch.cuda.is_available() else "cpu",
+    logger: Optional[logging.Logger] = None
+) -> MetricsResult:
+    """Calculate all metrics for summarization evaluation."""
+    logger = logger or logging.getLogger(__name__)
+    rouge_types = rouge_types or ["rouge1", "rouge2", "rougeL"]
+
+    # Calculate ROUGE
+    rouge_scores = calculate_rouge_scores(
+        predictions,
+        references,
+        rouge_types=rouge_types,
+        use_stemming=use_stemming
+    )
+
+    # Calculate BLEU
+    bleu = calculate_bleu_score(predictions, references)
+
+    # Calculate METEOR
+    meteor = calculate_meteor_score(predictions, references)
+
+    # Calculate means
+    mean_scores = {
+        "mean_rouge": np.mean(list(rouge_scores.values())),
+        "mean_bleu": bleu,
+        "mean_meteor": meteor
+    }
+
+    return MetricsResult(
+        rouge_scores=rouge_scores,
+        bleu_score=bleu,
+        meteor_score=meteor,
+        mean_scores=mean_scores
+    )

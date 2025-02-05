@@ -1,22 +1,20 @@
 """Text Summarization Pipeline using Pre-trained Models"""
 
-import argparse
+from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Tuple, Union, Optional, Literal
-from dataclasses import dataclass
-
-from transformers import AutoModelForSeq2SeqLM, AutoTokenizer  # Fixed import
-import torch
-
-from src.utils.project_logger import ProjectLogger
-from src.utils.device_utils import setup_compute_device
-from src.models.inference.inference_manager import InferenceManager
-from src.models.inference.inference_dataclass import InferenceResult
-from src.data.cnn_daily_dataset import load_cnn_daily_dataset
-from src.validation.dataset_validator import ValidationMetrics, validate_dataset_split
-from src.evaluation.summary_metrics import EvaluationMetrics, calculate_metrics
 import numpy as np
-from src.utils.config_loader import load_yaml_config, PipelineConfig
+import torch
+from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
+
+# Local imports
+from .utils.project_logger import ProjectLogger
+from .utils.gpu_manager import GPUManager, GPUConfig
+from .models.inference.inference_manager import InferenceManager
+from .data.cnn_daily_dataset import load_cnn_daily_dataset
+from .validation.dataset_validator import ValidationMetrics, validate_dataset_split
+from .evaluation.summary_metrics import EvaluationMetrics, calculate_metrics
+from .utils.config_loader import load_yaml_config, PipelineConfig
 
 
 @dataclass
@@ -82,6 +80,9 @@ def generate_summary(
     Returns:
         Single SummarizationResult or list of results
     """
+    # Input validation
+    if not input_text:
+        raise ValueError("Input text cannot be empty")
     if min_length >= max_length:
         raise ValueError("min_length must be less than max_length")
 
@@ -162,7 +163,9 @@ def run_complete_pipeline(
         device: Computing device to use
         logger: Logger instance
     """
-    # Validate split ratios
+    # Validate inputs
+    if not model_name:
+        raise ValueError("Model name must be provided")
     if sum(split_ratios) != 1.0:
         raise ValueError("Split ratios must sum to 1.0")
 
@@ -267,45 +270,55 @@ def main():
     args = parse_args()
     logger = ProjectLogger("pretrained_pipeline")
     
-    # Load config if provided, otherwise use command line args
-    if args.config:
-        config = load_yaml_config(args.config)
-        # Override config with command line args if provided
-        if args.model_name:
-            config.model_name = args.model_name
-        if args.dataset_split:
-            config.dataset_split = args.dataset_split
-    else:
-        # Fallback to command line args (previous behavior)
-        config = PipelineConfig(
-            model_name="facebook/bart-large-cnn",
-            dataset_split="validation",
-            sample_size=100,
-            device="auto",
-            output_dir=Path("outputs")
+    try:
+        # Load and validate config
+        if args.config:
+            config = load_yaml_config(args.config)
+            if args.model_name:
+                config.model_name = args.model_name
+            if args.dataset_split:
+                config.dataset_split = args.dataset_split
+        else:
+            config = PipelineConfig(
+                model_name="facebook/bart-large-cnn",
+                dataset_split="validation",
+                sample_size=100,
+                device="auto",
+                output_dir=Path("outputs"),
+                max_length=512,
+                min_length=50,
+                num_beams=4
+            )
+        
+        # Validate config
+        if not config.model_name:
+            raise ValueError("Model name must be provided")
+            
+        # Ensure output directory exists
+        config.output_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Run pipeline with config
+        results = run_complete_pipeline(
+            model_name=config.model_name,
+            dataset_split=config.dataset_split,
+            sample_size=config.sample_size,
+            device=config.device,
+            max_length=config.max_length,
+            min_length=config.min_length,
+            num_beams=config.num_beams,
+            logger=logger
         )
-    
-    # Ensure output directory exists
-    config.output_dir.mkdir(parents=True, exist_ok=True)
-    
-    # Run pipeline with config
-    results = run_complete_pipeline(
-        model_name=config.model_name,
-        dataset_split=config.dataset_split,
-        sample_size=config.sample_size,
-        device=config.device,
-        max_length=config.max_length,
-        min_length=config.min_length,
-        num_beams=config.num_beams,
-        logger=logger
-    )
-    
-    # Save results
-    output_file = config.output_dir / f"results_{config.dataset_split}.json"
-    logger.save_results(results, output_file)
-    
-    print(f"\nResults saved to {output_file}")
-    print(f"Average ROUGE-1: {results.evaluation_metrics.rouge_scores['rouge1']:.3f}")
+        
+        # Save results
+        output_file = config.output_dir / f"results_{config.dataset_split}.json"
+        logger.save_results(results, output_file)
+        
+        print(f"\nResults saved to {output_file}")
+        print(f"Average ROUGE-1: {results.evaluation_metrics.rouge_scores['rouge1']:.3f}")
+        
+    except Exception as e:
+        logger.error(f"Pipeline failed: {str(e)}")
+        raise
 
 if __name__ == "__main__":
     main()
