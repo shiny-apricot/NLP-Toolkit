@@ -105,14 +105,19 @@ echo "Setting up process priority..."
 # Set nice level for Python processes to prioritize memory operations
 sudo renice -n -10 $$
 
+# Make runner script executable
+chmod +x scripts/run_pretrained.py
+
+# Update the final message
 echo """
 Setup complete! 
 
-To run the pipeline:
-python src/pipelines/aws_pipeline.py \\
-    --config configs/aws_configs/r5.2xlarge.yaml \\
+To run the pretrained pipeline:
+./scripts/run_pretrained.py \\
+    --model-name facebook/bart-large-cnn \\
     --dataset-split validation \\
-    --stop-instance
+    --sample-size 100 \\
+    --device auto
 
 Memory monitoring log: logs/memory_profiles/memory_usage.jsonl
 Setup info: logs/setup_info.json
