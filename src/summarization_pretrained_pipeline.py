@@ -16,6 +16,7 @@ from src.data.cnn_daily_dataset import load_cnn_daily_dataset
 from src.validation.dataset_validator import ValidationMetrics, validate_dataset_split
 from src.evaluation.summary_metrics import EvaluationMetrics, calculate_metrics
 import numpy as np
+from src.utils.config_loader import load_yaml_config, PipelineConfig
 
 
 @dataclass
@@ -244,33 +245,21 @@ def run_complete_pipeline(
 def parse_args():
     parser = argparse.ArgumentParser(description="Run pretrained summarization pipeline")
     parser.add_argument(
+        "--config",
+        type=Path,
+        help="Path to YAML config file"
+    )
+    # Keep existing arguments as fallback
+    parser.add_argument(
         "--model-name",
-        default="facebook/bart-large-cnn",
-        help="HuggingFace model name"
+        default=None,
+        help="Override model name from config"
     )
     parser.add_argument(
         "--dataset-split",
         choices=["train", "validation", "test"],
-        default="validation",
-        help="Dataset split to use"
-    )
-    parser.add_argument(
-        "--sample-size",
-        type=int,
-        default=100,
-        help="Number of articles to process"
-    )
-    parser.add_argument(
-        "--output-dir",
-        type=Path,
-        default=Path("outputs"),
-        help="Directory for outputs"
-    )
-    parser.add_argument(
-        "--device",
-        default="auto",
-        choices=["cpu", "cuda", "auto"],
-        help="Computing device to use"
+        default=None,
+        help="Override dataset split from config"
     )
     return parser.parse_args()
 
@@ -278,20 +267,41 @@ def main():
     args = parse_args()
     logger = ProjectLogger("pretrained_pipeline")
     
-    # Ensure output directory exists
-    args.output_dir.mkdir(parents=True, exist_ok=True)
+    # Load config if provided, otherwise use command line args
+    if args.config:
+        config = load_yaml_config(args.config)
+        # Override config with command line args if provided
+        if args.model_name:
+            config.model_name = args.model_name
+        if args.dataset_split:
+            config.dataset_split = args.dataset_split
+    else:
+        # Fallback to command line args (previous behavior)
+        config = PipelineConfig(
+            model_name="facebook/bart-large-cnn",
+            dataset_split="validation",
+            sample_size=100,
+            device="auto",
+            output_dir=Path("outputs")
+        )
     
-    # Run pipeline
+    # Ensure output directory exists
+    config.output_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Run pipeline with config
     results = run_complete_pipeline(
-        model_name=args.model_name,
-        dataset_split=args.dataset_split,
-        sample_size=args.sample_size,
-        device=args.device,
+        model_name=config.model_name,
+        dataset_split=config.dataset_split,
+        sample_size=config.sample_size,
+        device=config.device,
+        max_length=config.max_length,
+        min_length=config.min_length,
+        num_beams=config.num_beams,
         logger=logger
     )
     
     # Save results
-    output_file = args.output_dir / f"results_{args.dataset_split}.json"
+    output_file = config.output_dir / f"results_{config.dataset_split}.json"
     logger.save_results(results, output_file)
     
     print(f"\nResults saved to {output_file}")

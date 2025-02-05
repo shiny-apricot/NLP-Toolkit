@@ -1,0 +1,27 @@
+model:
+  model_type: "bart"
+  model_name: "facebook/bart-base"
+  dtype: "float32"
+  max_length: 512
+  min_length: 50
+  num_beams: 4
+
+dataset:
+  split: "validation"
+  sample_size: 100
+  cache_dir: "cache"
+
+aws:
+  region: "us-west-2"
+  s3_bucket: "my-summarization-model-bucket"
+  enable_spot: true
+
+logging:
+  level: "INFO"
+  log_dir: "./logs"
+  cloudwatch_enabled: true
+
+security:
+  enable_iam_auth: true
+  use_aws_ssm: true
+  encrypt_outputs: true
