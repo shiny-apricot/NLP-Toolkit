@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import List, Tuple, Union, Optional, Literal
 from dataclasses import dataclass
 
-from transformers import AutoModelForSeq2SeqGeneration, AutoTokenizer
+from transformers import AutoModelForSeq2SeqLM, AutoTokenizer  # Fixed import
 import torch
 
 from src.utils.project_logger import ProjectLogger
@@ -91,7 +91,7 @@ def generate_summary(
 
     # Setup device and load model
     device = setup_compute_device(device)
-    model = AutoModelForSeq2SeqGeneration.from_pretrained(model_name).to(device)
+    model = AutoModelForSeq2SeqLM.from_pretrained(model_name).to(device)  # Fixed class name
     tokenizer = AutoTokenizer.from_pretrained(model_name)
 
     # Initialize inference manager
