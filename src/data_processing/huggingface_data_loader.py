@@ -5,7 +5,7 @@ import torch
 from pathlib import Path
 from transformers import PreTrainedTokenizer, AutoTokenizer
 from src.utils.project_logger import get_logger
-from src.data.preprocessing import preprocess_text, ProcessingResult
+from preprocessing import TokenData, preprocess_text, ProcessingResult
 from datetime import datetime
 import json
 
@@ -254,7 +254,7 @@ class HuggingFaceLoader:
 
     def _create_token_batch(
         self,
-        token_dicts: List[dict]
+        token_dicts: List[TokenData]
     ) -> TokenBatch:
         """Convert list of token dictionaries to TokenBatch."""
         padded = self.tokenizer.pad(token_dicts, padding=True, return_tensors="pt")

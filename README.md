@@ -1,3 +1,8 @@
+python -m src.pipelines.run_summary_pretrained \
+    --config configs/instances/r5.yaml \
+    --save-model models/bart-cpu-optimized \
+    --samples 1000
+    
 # Project Roadmap
 
 ## 1. Setup & Environment
