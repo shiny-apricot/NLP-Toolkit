@@ -60,7 +60,7 @@ class PipelineConfig:
     min_length: int = 50
     num_beams: int = 4
     instance_type: str = "local"
-    compute: Dict[str, Any] = None
+    compute: Dict[str, Any] = dict()
 
 
 def deep_merge(dict1: Dict, dict2: Dict) -> Dict:

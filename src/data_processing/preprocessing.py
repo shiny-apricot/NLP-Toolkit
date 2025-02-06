@@ -7,10 +7,17 @@ import logging
 from nltk.tokenize import sent_tokenize
 
 @dataclass
+class TokenData:
+    """Container for tokenized text data."""
+    input_ids: torch.Tensor
+    attention_mask: torch.Tensor
+    token_type_ids: Optional[torch.Tensor] = None
+
+@dataclass
 class ProcessingResult:
     cleaned_text: str
     sentences: List[str]
-    tokens: Optional[Dict[str, torch.Tensor]] = None
+    tokens: Optional[TokenData] = None
 
 def preprocess_text(
     text: str,
@@ -18,10 +25,10 @@ def preprocess_text(
     max_length: int,
     min_length: int,
     tokenizer: PreTrainedTokenizer,
-    remove_urls: bool = True,
-    remove_html: bool = True,
+    remove_urls: bool = False,
+    remove_html: bool = False,
     normalize_whitespace: bool = True,
-    lowercase: bool = True,
+    lowercase: bool = False,
     logger: Optional[logging.Logger] = None
 ) -> ProcessingResult:
     """Process input text for summarization."""
@@ -86,12 +93,18 @@ def tokenize_text(
     return_tensors: str = "pt",
     truncation: bool = True,
     padding: bool = True
-) -> Dict[str, torch.Tensor]:
+) -> TokenData:
     """Tokenize text using the provided tokenizer."""
-    return tokenizer(
+    tokens = tokenizer(
         text,
         max_length=max_length,
         truncation=truncation,
         padding=padding,
         return_tensors=return_tensors
+    )
+    
+    return TokenData(
+        input_ids=tokens["input_ids"],
+        attention_mask=tokens["attention_mask"],
+        token_type_ids=tokens.get("token_type_ids")
     )

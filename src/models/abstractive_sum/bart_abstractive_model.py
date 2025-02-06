@@ -1,75 +1,66 @@
 """
-BART-based abstractive summarization model implementation.
-Uses pretrained BART model for text summarization with optimized inference.
+BART-based abstractive summarization model with training and inference capabilities.
 """
 
 from dataclasses import dataclass
-from typing import List, Optional
-import torch 
+from typing import List, Optional, Dict, Any
+import torch
 from transformers import BartForConditionalGeneration, BartTokenizer
 import logging
 from pathlib import Path
 from utils.save_model import save_model
 
+@dataclass
+class BartConfig:
+    """Configuration for BART model."""
+    model_name: str = "facebook/bart-large-cnn"
+    max_length: int = 1024
+    min_length: int = 50
+    length_penalty: float = 2.0
+    num_beams: int = 4
+    device_map: str = "auto"
+    use_bfloat16: bool = True
 
-class ModelInitializationError(Exception):
-    """Raised when model initialization fails."""
-    pass
-
-class TokenizationError(Exception):
-    """Raised when text tokenization fails."""
-    pass
-
-@dataclass 
+@dataclass
 class SummarizationResult:
     """Structured output for summarization results."""
     summary: str
     input_tokens: int
     output_tokens: int
     processing_time: float
+    attention_scores: Optional[Dict[str, float]] = None
 
-class BartAbstractiveSummarizer:
-    """BART-based abstractive summarization model."""
+class BartModelError(Exception):
+    """Base class for BART model errors."""
+    pass
+
+class ModelInitializationError(BartModelError):
+    """Raised when model initialization fails."""
+    pass
+
+class TokenizationError(BartModelError):
+    """Raised when text tokenization fails."""
+    pass
+
+class BartBaseModel:
+    """Base class for BART summarization model."""
     
     def __init__(
         self,
-        model_name: str = "facebook/bart-large-cnn",
-        *,  # Force named parameters
-        max_length: int = 1024,
-        min_length: int = 50,
-        length_penalty: float = 2.0, 
-        num_beams: int = 4,
-        device_map: str = "auto",
-        use_bfloat16: bool = True,
+        config: BartConfig,
         logger: Optional[logging.Logger] = None
     ):
-        """
-        Initialize BART summarizer.
-
-        Args:
-            model_name: Pretrained model name/path
-            max_length: Maximum output length 
-            min_length: Minimum output length
-            length_penalty: Length penalty factor
-            num_beams: Number of beams for beam search
-            device_map: Device mapping strategy
-            use_bfloat16: Whether to use bfloat16
-            logger: Optional logger instance
-        """
+        self.config = config
         self.logger = logger or logging.getLogger(__name__)
         
         try:
-            dtype = torch.bfloat16 if use_bfloat16 else torch.float32
+            dtype = torch.bfloat16 if config.use_bfloat16 else torch.float32
             self.model = BartForConditionalGeneration.from_pretrained(
-                model_name,
-                device_map=device_map,
+                config.model_name,
+                device_map=config.device_map,
                 torch_dtype=dtype
             )
-            self.tokenizer = BartTokenizer.from_pretrained(model_name)
-            self.max_length = max_length
-            self.min_length = min_length
-            self.length_penalty = length_penalty
-            self.num_beams = num_beams
+            self.tokenizer = BartTokenizer.from_pretrained(config.model_name)
             
         except Exception as e:
             self.logger.error(f"Failed to initialize BART model: {e}")
@@ -78,30 +69,17 @@ class BartAbstractiveSummarizer:
     def save(
         self,
         save_path: Path,
-        *,  # Force named parameters
+        *,
         version: str,
         description: Optional[str] = None,
-        performance_metrics: Optional[dict] = None,
-        s3_bucket: Optional[str] = None,
-        aws_region: Optional[str] = None
+        performance_metrics: Optional[dict] = None
     ) -> Path:
-        """
-        Save model with metadata.
-
-        Args:
-            save_path: Path to save model
-            version: Model version
-            description: Optional model description
-            performance_metrics: Optional performance metrics
-            s3_bucket: Optional S3 bucket for upload
-            aws_region: Optional AWS region
-        """
-        
+        """Save model with metadata."""
         training_params = {
-            "max_length": self.max_length,
-            "min_length": self.min_length,
-            "length_penalty": self.length_penalty,
-            "num_beams": self.num_beams
+            "max_length": self.config.max_length,
+            "min_length": self.config.min_length,
+            "length_penalty": self.config.length_penalty,
+            "num_beams": self.config.num_beams
         }
         
         try:
@@ -112,85 +90,24 @@ class BartAbstractiveSummarizer:
                 version=version,
                 description=description,
                 training_params=training_params,
-                performance_metrics=performance_metrics,
-                s3_bucket=s3_bucket,
-                aws_region=aws_region
+                performance_metrics=performance_metrics
             )
         except Exception as e:
             self.logger.error(f"Failed to save model: {e}")
             raise
 
-    def summarize(
-        self,
-        text: str,
-        *,  # Force named parameters
-        max_length: Optional[int] = None,
-        min_length: Optional[int] = None
-    ) -> SummarizationResult:
-        """
-        Generate abstractive summary of input text.
-
-        Args:
-            text: Input text to summarize
-            max_length: Optional override for max length
-            min_length: Optional override for min length
-
-        Returns:
-            SummarizationResult containing summary and metadata
-
-        Raises:
-            TokenizationError: If tokenization fails
-        """
-        max_length = max_length or self.max_length
-        min_length = min_length or self.min_length
-
+    def _tokenize(self, text: str) -> Dict[str, torch.Tensor]:
+        """Tokenize input text."""
         try:
-            with GPUManager():
-                inputs = self.tokenizer(
-                    text,
-                    max_length=self.max_length,
-                    truncation=True,
-                    return_tensors="pt"
-                ).to(self.model.device)
-
-                start_time = torch.cuda.Event(enable_timing=True)
-                end_time = torch.cuda.Event(enable_timing=True)
-                
-                start_time.record()
-                outputs = self.model.generate(
-                    inputs["input_ids"],
-                    max_length=max_length,
-                    min_length=min_length, 
-                    length_penalty=self.length_penalty,
-                    num_beams=self.num_beams,
-                    early_stopping=True
-                )
-                end_time.record()
-                torch.cuda.synchronize()
-                
-                summary = self.tokenizer.decode(
-                    outputs[0],
-                    skip_special_tokens=True
-                )
-                
-                return SummarizationResult(
-                    summary=summary,
-                    input_tokens=len(inputs["input_ids"][0]),
-                    output_tokens=len(outputs[0]),
-                    processing_time=start_time.elapsed_time(end_time) / 1000
-                )
-
+            return self.tokenizer(
+                text,
+                max_length=self.config.max_length,
+                truncation=True,
+                return_tensors="pt"
+            ).to(self.model.device)
         except Exception as e:
-            self.logger.error(f"Summarization failed: {e}")
-            raise TokenizationError(f"Failed to process text: {e}")
+            raise TokenizationError(f"Failed to tokenize text: {e}")
 
-class GPUManager:
-    """Context manager for GPU memory management."""
-    def __enter__(self):
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+    def _decode(self, token_ids: torch.Tensor) -> str:
+        """Decode token IDs to text."""
+        return self.tokenizer.decode(token_ids, skip_special_tokens=True)

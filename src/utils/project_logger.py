@@ -8,6 +8,9 @@ from logging import LogRecord
 import watchtower
 import boto3
 from boto3.session import Session
+import json
+from dataclasses import asdict
+
 
 def _create_log_record_factory():
     """Create a LogRecord factory that supports extra fields."""
@@ -127,6 +130,24 @@ class ProjectLogger(logging.Logger):
     def debug(self, msg: object, *args: Any, **kwargs: Any) -> None:
         """Log debug level message with optional context."""
         self._log_with_extra(logging.DEBUG, msg, *args, **kwargs)
+    
+    def save_results(self, results: Any, output_file: Path) -> None:
+        """Save pipeline results to a JSON file.
+
+        Args:
+            results: Pipeline results to save
+            output_file: Path to output JSON file
+
+        """
+
+        # Convert dataclass instances to dictionaries
+
+        results_dict = asdict(results)
+
+        with open(output_file, 'w') as f:
+            json.dump(results_dict, f, indent=2)       
+
+        self.info(f"Results saved to {output_file}")
 
 def get_logger(
     name: str,
@@ -174,3 +195,6 @@ if __name__ == "__main__":
     )
     
     logger.info("Processing batch", batch_id=123, memory_usage=1024)
+
+
+
