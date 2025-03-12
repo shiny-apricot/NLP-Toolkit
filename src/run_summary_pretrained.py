@@ -5,189 +5,192 @@ Orchestrates data loading, inference, evaluation, and result saving.
 
 from pathlib import Path
 from dataclasses import dataclass
-from datetime import datetime
-import torch
 from typing import Optional, List
+import torch
+from datetime import datetime
 
-from src.data_processing.huggingface_data_loader import (
+from data_processing.huggingface_data_loader import (
     HuggingFaceLoader,
-    TokenizedDataset,
-    PreprocessingParams
+    DatasetError
 )
-from src.models.abstractive_sum.bart_inference import (
+from models.abstractive_sum.bart_inference import (
     BartInference,
     InferenceConfig,
-    BartConfig
 )
-from src.evaluation.metrics import (
-    calculate_summarization_metrics,
-    MetricsResult
+from models.abstractive_sum.bart_abstractive_model import (
+    BartConfig,
+    SummarizationResult
 )
-from src.utils.config_loader import (
-    PipelineConfig,
-    load_yaml_config
-)
-from src.utils.project_logger import get_logger
-from src.utils.save_model import save_model
+from utils.project_logger import get_logger
+from utils.config_loader import load_yaml_config, PipelineConfig
+from utils.aws_utils import AWSModelStorage
+
 
 @dataclass
 class PipelineResults:
     """Container for pipeline execution results."""
-    metrics: MetricsResult
-    sample_predictions: List[str]
-    sample_references: List[str]
+    summaries: List[SummarizationResult]
     processing_time: float
-    dataset_size: int
-    model_path: Optional[Path]
+    input_samples: int
+    successful_samples: int
+    failed_samples: int
+    model_name: str
+    dataset_name: str
+    timestamp: str = datetime.utcnow().isoformat()
 
-def run_summarization_pipeline(
+
+def run_summary_pretrained(
     config_path: Path,
     *,  # Force keyword arguments
-    save_model_path: Optional[Path] = None,
-    sample_size: Optional[int] = None
+    output_dir: Optional[Path] = None,
+    aws_bucket: Optional[str] = None,
+    aws_region: Optional[str] = None
 ) -> PipelineResults:
     """
-    Run end-to-end summarization pipeline.
+    Run summarization pipeline with pretrained model.
 
     Args:
-        config_path: Path to pipeline configuration YAML
-        save_model_path: Optional path to save the model
-        sample_size: Optional limit on number of samples to process
+        config_path: Path to pipeline configuration file
+        output_dir: Directory for saving results
+        aws_bucket: Optional S3 bucket for model/results storage
+        aws_region: AWS region for S3 bucket
 
     Returns:
-        PipelineResults containing metrics and samples
+        PipelineResults containing summarization outputs and metrics
     """
-    # Load configuration
-    config = load_yaml_config(config_path)
-    
     # Initialize logger
     logger = get_logger(
         "summarization_pipeline",
-        log_file=config.output_dir / "pipeline.log",
-        cloudwatch_group="/summarization/pretrained",
-        aws_region="us-west-2"  # Consider moving to config
+        log_file=Path("logs/pipeline.log"),
+        cloudwatch_group="/aws/summarization" if aws_bucket else None,
+        aws_region=aws_region
     )
     
-    logger.info(
-        "Starting summarization pipeline",
-        config_path=str(config_path),
-        device=config.device,
-        model=config.model_name
-    )
-
-    start_time = datetime.now()
-
     try:
-        # Initialize data loader
-        loader = HuggingFaceLoader.load_cnn_daily(
-            split=config.dataset_split,
-            max_samples=sample_size or config.sample_size,
-            shuffle=True,
-            cache_dir=Path("cache")
-        )
+        # Load configuration
+        config = load_yaml_config(config_path)
+        output_dir = output_dir or Path("outputs")
+        output_dir.mkdir(parents=True, exist_ok=True)
 
-        # Load and preprocess dataset
-        dataset = loader.load_and_preprocess(
-            preprocessing_params=PreprocessingParams(
-                remove_html=True,
-                normalize_whitespace=True
+        # Initialize AWS storage if specified
+        storage = None
+        if aws_bucket and aws_region:
+            storage = AWSModelStorage(
+                bucket=aws_bucket,
+                region=aws_region,
+                model_prefix="summarization_models",
+                logger=logger
             )
-        )
 
-        # Initialize model for inference
+        # Initialize model config
         model_config = BartConfig(
             model_name=config.model_name,
             max_length=config.max_length,
             min_length=config.min_length,
             num_beams=config.num_beams,
-            device_map=config.device,
-            use_bfloat16=True
+            device_map="cuda" if torch.cuda.is_available() else "cpu"
         )
-
+        
         inference_config = InferenceConfig(
             batch_size=8,
             max_length=config.max_length,
-            min_length=config.min_length,
-            num_return_sequences=1
+            min_length=config.min_length
         )
 
-        # Run inference
+        # Initialize BART model first for its tokenizer
         with BartInference(model_config, inference_config) as model:
-            predictions = model.summarize_batch(
-                dataset.raw_texts,
-                return_attention=False
-            )
-            
-            generated_summaries = [p.summary for p in predictions]
-
-            # Calculate metrics
-            metrics = calculate_summarization_metrics(
-                predictions=generated_summaries,
-                references=dataset.raw_summaries,
-                device=config.device,
-                logger=logger
-            )
-
-            # Save model if path provided
-            model_path = None
-            if save_model_path:
-                model_path = save_model(
-                    model=model.model,
+            try:
+                # Create data loader with model's tokenizer
+                loader = HuggingFaceLoader(
+                    dataset_config=HuggingFaceLoader.DATASET_CONFIGS["cnn_dailymail"],
                     tokenizer=model.tokenizer,
-                    save_path=save_model_path,
-                    version="1.0.0",
-                    description="Pretrained BART model for summarization",
-                    performance_metrics=metrics.mean_scores
+                    max_length=config.max_length,
+                    batch_size=8,
+                    num_workers=4
                 )
 
-            # Log results
-            logger.info(
-                "Pipeline completed successfully",
-                rouge_scores=metrics.rouge_scores,
-                bleu_score=metrics.bleu_score,
-                meteor_score=metrics.meteor_score,
-                processing_time=(datetime.now() - start_time).total_seconds(),
-                dataset_size=len(dataset.raw_texts)
-            )
+                # Load and preprocess dataset
+                processed_dataset = loader.load_and_preprocess(
+                    split=config.dataset_split,
+                    max_length=config.max_length,
+                    truncation=True,
+                    padding=True,
+                    use_cache=True
+                )
 
-            # Prepare results
-            results = PipelineResults(
-                metrics=metrics,
-                sample_predictions=generated_summaries[:5],  # First 5 predictions
-                sample_references=dataset.raw_summaries[:5],  # First 5 references
-                processing_time=(datetime.now() - start_time).total_seconds(),
-                dataset_size=len(dataset.raw_texts),
-                model_path=model_path
-            )
+                start_time = datetime.now()
+                logger.info("Starting summarization pipeline", 
+                        model=config.model_name,
+                        dataset_split=config.dataset_split,
+                        samples=len(processed_dataset.raw_texts))
 
-            # Save results
-            logger.save_results(
-                results,
-                config.output_dir / f"results_{datetime.now():%Y%m%d_%H%M%S}.json"
-            )
+                # Run inference
+                summaries = model.summarize_batch(
+                    processed_dataset.raw_texts,
+                    return_attention=True
+                )
 
-            return results
+                # Calculate success/failure counts
+                successful = len([s for s in summaries if s.summary])
+                failed = len(summaries) - successful
+
+                # Create results container
+                results = PipelineResults(
+                    summaries=summaries,
+                    processing_time=(datetime.now() - start_time).total_seconds(),
+                    input_samples=len(processed_dataset.raw_texts),
+                    successful_samples=successful,
+                    failed_samples=failed,
+                    model_name=config.model_name,
+                    dataset_name=loader.dataset_name
+                )
+
+                # Save results
+                output_file = output_dir / f"summaries_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+                logger.save_results(results, output_file)
+
+                # Save model if using AWS
+                if storage:
+                    model.save(
+                        Path("models/latest"),
+                        version="latest",
+                        description="Latest inference model",
+                        performance_metrics={
+                            "successful_samples": successful,
+                            "failed_samples": failed,
+                            "processing_time": results.processing_time
+                        }
+                    )
+
+                logger.info("Pipeline completed successfully",
+                          processing_time=results.processing_time,
+                          successful=successful,
+                          failed=failed)
+
+                return results
+
+            except Exception as e:
+                logger.error("Pipeline execution failed", error=str(e))
+                raise
 
     except Exception as e:
-        logger.error(
-            "Pipeline failed",
-            error=str(e),
-            processing_time=(datetime.now() - start_time).total_seconds()
-        )
+        logger.error("Pipeline initialization failed", error=str(e))
         raise
 
 if __name__ == "__main__":
     import argparse
     
     parser = argparse.ArgumentParser(description="Run summarization pipeline")
-    parser.add_argument("--config", type=Path, required=True, help="Path to config YAML")
-    parser.add_argument("--save-model", type=Path, help="Path to save model")
-    parser.add_argument("--samples", type=int, help="Number of samples to process")
+    parser.add_argument("--config", type=Path, required=True, help="Path to config file")
+    parser.add_argument("--output-dir", type=Path, help="Output directory")
+    parser.add_argument("--aws-bucket", help="AWS S3 bucket name")
+    parser.add_argument("--aws-region", help="AWS region")
     
     args = parser.parse_args()
     
-    results = run_summarization_pipeline(
-        config_path=args.config,
-        save_model_path=args.save_model,
-        sample_size=args.samples
+    results = run_summary_pretrained(
+        args.config,
+        output_dir=args.output_dir,
+        aws_bucket=args.aws_bucket,
+        aws_region=args.aws_region
     )
