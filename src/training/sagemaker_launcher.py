@@ -13,7 +13,8 @@ import sagemaker
 from sagemaker.pytorch import PyTorch
 from sagemaker.local import LocalSession
 
-from ..utils.project_logger import get_logger  # Fix relative import
+from ..utils.project_logger import get_logger
+from ..utils.model_storage import format_input_path, get_default_model_location, parse_storage_location
 
 
 @dataclass
@@ -31,6 +32,8 @@ class SageMakerJobConfig:
     output_path: Optional[str] = None
     model_name: str = "facebook/bart-large-cnn"
     dataset_name: str = "cnn_dailymail"
+    use_s3: bool = False
+    s3_bucket: Optional[str] = None
     hyperparameters: Optional[Dict[str, Any]] = None
 
 
@@ -80,12 +83,22 @@ def launch_training_job(
     if logger is None:
         logger = get_logger("sagemaker_launcher", level="INFO")
     
-    # Create local SageMaker session
-    sagemaker_session = LocalSession()
-    sagemaker_session.config = {'local': {'local_code': True}}
+    # Create local SageMaker session if using local instance
+    if config.instance_type.startswith("local"):
+        sagemaker_session = LocalSession()
+        sagemaker_session.config = {'local': {'local_code': True}}
+    else:
+        sagemaker_session = sagemaker.Session()
     
     # Set default output path if not provided
-    output_path = config.output_path or str(Path(f"/tmp/summarization-models/{config.job_name}").absolute())
+    if not config.output_path:
+        config.output_path = get_default_model_location(
+            model_name=config.job_name,
+            use_s3=config.use_s3,
+            s3_bucket=config.s3_bucket
+        )
+    
+    logger.info(f"Model output will be stored at: {config.output_path}")
     
     # Prepare hyperparameters
     hyperparameters = config.hyperparameters or {
@@ -97,6 +110,9 @@ def launch_training_job(
         "max-length": 512,
         "min-length": 50,
     }
+    
+    # Format paths correctly for SageMaker
+    formatted_output = format_input_path(config.output_path)
     
     # Create SageMaker estimator
     estimator = PyTorch(
@@ -110,18 +126,17 @@ def launch_training_job(
         max_run=config.max_run_seconds,
         volume_size=config.volume_size,
         hyperparameters=hyperparameters,
-        output_path=output_path,
+        output_path=formatted_output,
         sagemaker_session=sagemaker_session
     )
     
     logger.info(f"Launching SageMaker training job: {config.job_name}")
     
-    # Ensure data directory exists
-    data_path = Path(config.data_dir)
-    data_path.mkdir(parents=True, exist_ok=True)
+    # Format data directory correctly
+    formatted_data_dir = format_input_path(config.data_dir)
     
-    # Use local paths instead of S3
-    estimator.fit({'training': str(data_path)}, job_name=config.job_name)
+    # Use formatted path for training
+    estimator.fit({'training': formatted_data_dir}, job_name=config.job_name)
     
     logger.info(f"Training job completed. Model artifacts: {estimator.model_data}")
     return config.job_name
@@ -134,8 +149,10 @@ if __name__ == "__main__":
     parser.add_argument("--instance-type", type=str, default="local", help="Instance type")
     parser.add_argument("--instance-count", type=int, default=1, help="Number of instances")
     parser.add_argument("--model-name", type=str, default="facebook/bart-large-cnn", help="Model name")
-    parser.add_argument("--data-dir", type=str, default="/tmp/summarization-data", help="Local data directory")
-    parser.add_argument("--output-path", type=str, help="Local output directory")
+    parser.add_argument("--data-dir", type=str, default="/tmp/summarization-data", help="Data directory")
+    parser.add_argument("--output-path", type=str, help="Output directory")
+    parser.add_argument("--use-s3", action="store_true", help="Use S3 for storage")
+    parser.add_argument("--s3-bucket", type=str, help="S3 bucket name for storage")
     
     args = parser.parse_args()
     
@@ -146,7 +163,9 @@ if __name__ == "__main__":
         instance_count=args.instance_count,
         model_name=args.model_name,
         data_dir=args.data_dir,
-        output_path=args.output_path
+        output_path=args.output_path,
+        use_s3=args.use_s3,
+        s3_bucket=args.s3_bucket
     )
     
     # Use the existing sagemaker_training.py as the entry point
