@@ -11,6 +11,7 @@ from typing import Optional, Dict, Any, List
 import boto3
 import sagemaker
 from sagemaker.pytorch import PyTorch
+from sagemaker.local import LocalSession
 
 from ..utils.project_logger import get_logger  # Fix relative import
 
@@ -26,7 +27,7 @@ class SageMakerJobConfig:
     py_version: str = "py39"
     volume_size: int = 100
     max_run_seconds: int = 86400  # 24 hours
-    bucket: str = "summarization-models"
+    data_dir: str = "/tmp/summarization-data"
     output_path: Optional[str] = None
     model_name: str = "facebook/bart-large-cnn"
     dataset_name: str = "cnn_dailymail"
@@ -79,12 +80,12 @@ def launch_training_job(
     if logger is None:
         logger = get_logger("sagemaker_launcher", level="INFO")
     
-    # Create SageMaker session
-    boto_session = boto3.Session(region_name="us-east-1")
-    sagemaker_session = sagemaker.Session(boto_session=boto_session)
+    # Create local SageMaker session
+    sagemaker_session = LocalSession()
+    sagemaker_session.config = {'local': {'local_code': True}}
     
     # Set default output path if not provided
-    output_path = config.output_path or f"s3://{config.bucket}/models/{config.job_name}"
+    output_path = config.output_path or str(Path(f"/tmp/summarization-models/{config.job_name}").absolute())
     
     # Prepare hyperparameters
     hyperparameters = config.hyperparameters or {
@@ -114,7 +115,13 @@ def launch_training_job(
     )
     
     logger.info(f"Launching SageMaker training job: {config.job_name}")
-    estimator.fit({'training': f"s3://{config.bucket}/datasets"}, job_name=config.job_name)
+    
+    # Ensure data directory exists
+    data_path = Path(config.data_dir)
+    data_path.mkdir(parents=True, exist_ok=True)
+    
+    # Use local paths instead of S3
+    estimator.fit({'training': str(data_path)}, job_name=config.job_name)
     
     logger.info(f"Training job completed. Model artifacts: {estimator.model_data}")
     return config.job_name
@@ -124,9 +131,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Launch SageMaker training job")
     parser.add_argument("--job-name", type=str, required=True, help="Training job name")
     parser.add_argument("--role-arn", type=str, required=True, help="IAM role ARN for SageMaker")
-    parser.add_argument("--instance-type", type=str, default="ml.p3.2xlarge", help="Instance type")
+    parser.add_argument("--instance-type", type=str, default="local", help="Instance type")
     parser.add_argument("--instance-count", type=int, default=1, help="Number of instances")
     parser.add_argument("--model-name", type=str, default="facebook/bart-large-cnn", help="Model name")
+    parser.add_argument("--data-dir", type=str, default="/tmp/summarization-data", help="Local data directory")
+    parser.add_argument("--output-path", type=str, help="Local output directory")
     
     args = parser.parse_args()
     
@@ -135,12 +144,12 @@ if __name__ == "__main__":
         role_arn=args.role_arn,
         instance_type=args.instance_type,
         instance_count=args.instance_count,
-        model_name=args.model_name
+        model_name=args.model_name,
+        data_dir=args.data_dir,
+        output_path=args.output_path
     )
     
     # Use the existing sagemaker_training.py as the entry point
-    # source_dir = Path(__file__).parent.parent  # Points to the src directory
-    # entry_point = Path("training/sagemaker_training.py")  # Relative to source_dir
     source_dir = Path(__file__).parent  # Points to the src/training directory
     entry_point = Path("sagemaker_training.py")  # Direct file name 
     

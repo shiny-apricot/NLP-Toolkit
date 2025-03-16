@@ -107,14 +107,14 @@ First, ensure you have AWS credentials properly configured:
 aws configure
 ```
 
-Prepare your dataset by uploading it to S3:
+Prepare your dataset by placing it in a local directory:
 
 ```bash
-# Create bucket if it doesn't exist
-aws s3 mb s3://summarization-models
+# Create directory if it doesn't exist
+mkdir -p /tmp/summarization-data
 
-# Upload dataset (example with CNN/DailyMail)
-aws s3 cp datasets/cnn_dailymail s3://summarization-models/datasets/cnn_dailymail --recursive
+# Copy dataset to local directory (example with CNN/DailyMail)
+cp -r datasets/cnn_dailymail /tmp/summarization-data/
 ```
 
 #### 2. Launch Training Job
@@ -125,28 +125,25 @@ You can launch a training job using our provided launcher script:
 python -m src.training.sagemaker_launcher \
   --job-name bart-training-job \
   --role-arn arn:aws:iam::123456789012:role/SageMakerExecutionRole \
-  --instance-type ml.t3.medium \
+  --instance-type local \
   --instance-count 1 \
-  --model-name facebook/bart-large-cnn
+  --model-name facebook/bart-large-cnn \
+  --data-dir /tmp/summarization-data \
+  --output-path /tmp/summarization-models/bart-output
 ```
 
 Additional options:
 - `--pytorch-version`: Specify PyTorch version (default: 1.13.1)
-- `--bucket`: S3 bucket for storing model artifacts (default: summarization-models)
+- `--data-dir`: Local directory for dataset (default: /tmp/summarization-data)
 - `--dataset-name`: Dataset to use for training (default: cnn_dailymail)
 
 #### 3. Monitor Training Progress
 
-Track your training job in the AWS SageMaker console or via AWS CLI:
+Track your training job in the logs:
 
 ```bash
-# Get training job status
-aws sagemaker describe-training-job --training-job-name bart-training-job
-
-# Stream training logs
-aws logs get-log-events \
-  --log-group-name /aws/sagemaker/TrainingJobs \
-  --log-stream-name bart-training-job
+# View training logs
+tail -f /tmp/summarization-models/bart-training-job/logs/training.log
 ```
 
 ### Inference with Trained Models
@@ -159,8 +156,8 @@ After training is complete, deploy your model to a SageMaker endpoint:
 from src.inference.deploy_model import deploy_summarization_endpoint
 
 endpoint_name = deploy_summarization_endpoint(
-    model_s3_path="s3://summarization-models/models/bart-training-job/output/model.tar.gz",
-    instance_type="ml.g4dn.xlarge",
+    model_path="/tmp/summarization-models/bart-training-job/output/model",
+    instance_type="local",
     endpoint_name="summarization-endpoint"
 )
 ```
@@ -196,7 +193,7 @@ text = "Your long text to summarize goes here..."
 
 summary = summarize_text_locally(
     text=text,
-    model_path="models/bart-fine-tuned",
+    model_path="/tmp/summarization-models/bart-training-job/output/model",
     max_length=150,
     min_length=50,
     device="cuda"  # or "cpu"
