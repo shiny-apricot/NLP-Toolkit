@@ -139,8 +139,10 @@ if __name__ == "__main__":
     )
     
     # Use the existing sagemaker_training.py as the entry point
-    source_dir = Path(__file__).parent.parent  # Points to the src directory
-    entry_point = Path("training/sagemaker_training.py")  # Relative to source_dir
+    # source_dir = Path(__file__).parent.parent  # Points to the src directory
+    # entry_point = Path("training/sagemaker_training.py")  # Relative to source_dir
+    source_dir = Path(__file__).parent  # Points to the src/training directory
+    entry_point = Path("sagemaker_training.py")  # Direct file name 
     
     launch_training_job(
         config=config,

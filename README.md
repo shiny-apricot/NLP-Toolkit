@@ -125,7 +125,6 @@ You can launch a training job using our provided launcher script:
 python -m src.training.sagemaker_launcher \
   --job-name bart-training-job \
   --role-arn arn:aws:iam::123456789012:role/SageMakerExecutionRole \
-#   --instance-type ml.p3.2xlarge \
   --instance-type ml.t3.medium \
   --instance-count 1 \
   --model-name facebook/bart-large-cnn
