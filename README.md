@@ -94,6 +94,161 @@ batch_size: 8
 quantization: "int8"
 ```
 
+## 🏃‍♂️ Running Summarization Tasks
+
+### Model Training on SageMaker
+
+#### 1. Prepare for SageMaker Training
+
+First, ensure you have AWS credentials properly configured:
+
+```bash
+# Configure AWS CLI credentials if not using IAM roles
+aws configure
+```
+
+Prepare your dataset by uploading it to S3:
+
+```bash
+# Create bucket if it doesn't exist
+aws s3 mb s3://summarization-models
+
+# Upload dataset (example with CNN/DailyMail)
+aws s3 cp datasets/cnn_dailymail s3://summarization-models/datasets/cnn_dailymail --recursive
+```
+
+#### 2. Launch Training Job
+
+You can launch a training job using our provided launcher script:
+
+```bash
+python -m src.training.sagemaker_launcher \
+  --job-name bart-training-job \
+  --role-arn arn:aws:iam::123456789012:role/SageMakerExecutionRole \
+#   --instance-type ml.p3.2xlarge \
+  --instance-type ml.t3.medium \
+  --instance-count 1 \
+  --model-name facebook/bart-large-cnn
+```
+
+Additional options:
+- `--pytorch-version`: Specify PyTorch version (default: 1.13.1)
+- `--bucket`: S3 bucket for storing model artifacts (default: summarization-models)
+- `--dataset-name`: Dataset to use for training (default: cnn_dailymail)
+
+#### 3. Monitor Training Progress
+
+Track your training job in the AWS SageMaker console or via AWS CLI:
+
+```bash
+# Get training job status
+aws sagemaker describe-training-job --training-job-name bart-training-job
+
+# Stream training logs
+aws logs get-log-events \
+  --log-group-name /aws/sagemaker/TrainingJobs \
+  --log-stream-name bart-training-job
+```
+
+### Inference with Trained Models
+
+#### 1. Deploy Model to an Endpoint
+
+After training is complete, deploy your model to a SageMaker endpoint:
+
+```python
+from src.inference.deploy_model import deploy_summarization_endpoint
+
+endpoint_name = deploy_summarization_endpoint(
+    model_s3_path="s3://summarization-models/models/bart-training-job/output/model.tar.gz",
+    instance_type="ml.g4dn.xlarge",
+    endpoint_name="summarization-endpoint"
+)
+```
+
+#### 2. Run Inference
+
+Summarize texts using your deployed endpoint:
+
+```python
+from src.inference.summarize_text import summarize_with_endpoint
+
+text = """Your long text to summarize goes here. It should be several 
+sentences long to demonstrate the summarization capabilities effectively."""
+
+summary = summarize_with_endpoint(
+    text=text,
+    endpoint_name="summarization-endpoint",
+    max_length=150,
+    min_length=50
+)
+
+print(summary)
+```
+
+#### 3. Local Inference (without SageMaker endpoint)
+
+For development or testing, run inference locally:
+
+```python
+from src.inference.local_inference import summarize_text_locally
+
+text = "Your long text to summarize goes here..."
+
+summary = summarize_text_locally(
+    text=text,
+    model_path="models/bart-fine-tuned",
+    max_length=150,
+    min_length=50,
+    device="cuda"  # or "cpu"
+)
+
+print(summary)
+```
+
+### Running Extractive Summarization with TextRank
+
+TextRank provides a faster, computation-efficient summarization alternative:
+
+```python
+from src.models.extractive_sum.textrank import summarize_with_textrank
+
+text = """Your long document to summarize with the extractive method. 
+This approach will select the most important sentences rather than 
+generating new content."""
+
+summary = summarize_with_textrank(
+    text=text,
+    num_sentences=3,
+    language="english"
+)
+
+print(summary)
+```
+
+### Advanced Configuration
+
+Fine-tune your summarization tasks by editing configuration files:
+
+```yaml
+# Example: configs/training/bart_custom.yaml
+model_name: facebook/bart-large-cnn
+dataset_name: cnn_dailymail
+num_epochs: 5
+batch_size: 8
+learning_rate: 3e-5
+max_length: 1024
+min_length: 50
+```
+
+Then use this configuration:
+
+```bash
+python -m src.training.train_with_config \
+  --config configs/training/bart_custom.yaml \
+  --output-dir models/bart-custom
+```
+
 ## 📊 Evaluation
 
 Run evaluation on your summarization results:

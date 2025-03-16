@@ -80,7 +80,7 @@ def launch_training_job(
         logger = get_logger("sagemaker_launcher", level="INFO")
     
     # Create SageMaker session
-    boto_session = boto3.Session(region_name="us-west-2")
+    boto_session = boto3.Session(region_name="us-east-1")
     sagemaker_session = sagemaker.Session(boto_session=boto_session)
     
     # Set default output path if not provided
@@ -138,8 +138,9 @@ if __name__ == "__main__":
         model_name=args.model_name
     )
     
-    source_dir = Path("src")
-    entry_point = Path("sagemaker/train_bart.py")
+    # Use the existing sagemaker_training.py as the entry point
+    source_dir = Path(__file__).parent.parent  # Points to the src directory
+    entry_point = Path("training/sagemaker_training.py")  # Relative to source_dir
     
     launch_training_job(
         config=config,
