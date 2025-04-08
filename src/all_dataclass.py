@@ -3,14 +3,13 @@
 from dataclasses import dataclass
 from typing import Any, List, Literal, Optional
 
-@dataclass
-class LoadDatasetResult:
-    dataset: Any
-    tokenizer: Any
-    train_dataset: Any
-    test_dataset: Any
-    val_dataset: Any
 
+@dataclass
+class LoadTokenizerResult:
+    tokenizer: Any
+    special_tokens_dict: dict
+    special_tokens_added: bool
+    
 @dataclass
 class PreprocessedDataset:
     train_dataset: Any
@@ -20,7 +19,6 @@ class PreprocessedDataset:
 @dataclass
 class TrainModelResult:
     model: Any
-    tokenizer: Any
     training_args: Any
 
 @dataclass
@@ -39,7 +37,7 @@ class Metrics:
     meteor: Optional[float] = None
     rouge_1: Optional[float] = None
     rouge_2: Optional[float] = None
-    rouge_l: Optional[float] = None
+    rouge_L: Optional[float] = None
 
 @dataclass
 class EvaluationResult:
@@ -55,10 +53,17 @@ class DatasetConfig:
     dataset_name: Literal["cnn_dailymail", "xsum"]
     dataset_version: str
     sample_size: int
+    input_column: str
+    target_column: str
 
 @dataclass
 class ModelConfig:
     model_type: str
+    tokenizer_name: Literal["facebook/bart-large-cnn", 
+                            "bert-base-uncased",
+                            "distilbert-base-uncased",
+                            "facebook/bart-base",
+                            "t5-small"]
     pretrained_model_name: str
 
 @dataclass
@@ -82,3 +87,10 @@ class Config:
     training: TrainingConfig
     evaluation: EvaluationConfig
     output: OutputConfig
+
+@dataclass
+class LoadDatasetResult:
+    dataset: Any
+    train_dataset: Any
+    test_dataset: Any
+    val_dataset: Any

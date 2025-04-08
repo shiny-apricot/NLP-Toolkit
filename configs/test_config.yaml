@@ -3,10 +3,13 @@
 dataset:
   dataset_name: "cnn_dailymail"
   dataset_version: "3.0.0"
-  sample_size: 1000
+  sample_size: 10
+  input_column: "article"
+  target_column: "highlights"
 
 model:
-  model_type: "bart"
+  model_type: "bart-large"
+  tokenizer_name: "facebook/bart-large"
   pretrained_model_name: "facebook/bart-large-cnn"
 
 training:
