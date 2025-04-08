@@ -2,6 +2,7 @@
 
 dataset:
   dataset_name: "cnn_dailymail"
+  dataset_version: "3.0.0"
   sample_size: 1000
 
 model:

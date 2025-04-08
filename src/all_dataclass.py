@@ -1,9 +1,49 @@
 """Module for all dataclasses used in the summarization pipeline."""
 
 from dataclasses import dataclass
-from typing import Any, List
+from typing import Any, List, Literal, Optional
 
-from main import TrainModelResult
+@dataclass
+class LoadDatasetResult:
+    dataset: Any
+    tokenizer: Any
+    train_dataset: Any
+    test_dataset: Any
+    val_dataset: Any
+
+@dataclass
+class PreprocessedDataset:
+    train_dataset: Any
+    test_dataset: Any
+    val_dataset: Any
+
+@dataclass
+class TrainModelResult:
+    model: Any
+    tokenizer: Any
+    training_args: Any
+
+@dataclass
+class Metrics:
+    # Basic evaluation metrics
+    f1: Optional[float] = None
+    precision: Optional[float] = None
+    recall: Optional[float] = None
+    sensitivity: Optional[float] = None
+    specificity: Optional[float] = None
+    accuracy: Optional[float] = None
+    # Summarization-specific metrics
+    rouge: Optional[float] = None
+    bleu: Optional[float] = None
+    bert_score: Optional[float] = None
+    meteor: Optional[float] = None
+    rouge_1: Optional[float] = None
+    rouge_2: Optional[float] = None
+    rouge_l: Optional[float] = None
+
+@dataclass
+class EvaluationResult:
+    metrics: Metrics
 
 @dataclass
 class PipelineResult:
@@ -12,7 +52,8 @@ class PipelineResult:
 
 @dataclass
 class DatasetConfig:
-    dataset_name: str
+    dataset_name: Literal["cnn_dailymail", "xsum"]
+    dataset_version: str
     sample_size: int
 
 @dataclass
