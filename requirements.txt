@@ -3,30 +3,16 @@ torch
 transformers
 datasets
 accelerate
-bitsandbytes
 scikit-learn
-networkx
 
 # NLP Libraries
 nltk
 rouge-score
-sacrebleu
-spacy
 sentence-transformers
-
-# AWS Integration
-boto3
-botocore
-sagemaker
-awscli
-watchtower
 
 # Data Processing
 numpy
 pandas
-pyarrow
-pyyaml
-python-dotenv
 
 # Monitoring and Logging
 wandb
@@ -37,22 +23,3 @@ tqdm
 psutil
 py-cpuinfo
 
-# Development Tools
-black
-isort
-flake8
-pytest
-pytest-cov
-
-# Documentation
-sphinx
-sphinx-rtd-theme
-
-# Other
-gitpython # check if true
-
-# Optional Dependencies
-# Uncomment if needed
-# deepspeed  # For distributed training
-# fairscale  # For model sharding
-# flash-attn  # For faster attention computation

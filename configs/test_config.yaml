@@ -1,0 +1,22 @@
+# Configuration file for the text summarization pipeline.
+
+dataset:
+  dataset_name: "cnn_dailymail"
+  sample_size: 1000
+
+model:
+  model_type: "bart"
+  pretrained_model_name: "facebook/bart-large-cnn"
+
+training:
+  batch_size: 16
+  learning_rate: 5e-5
+  num_epochs: 3
+
+evaluation:
+  metrics:
+    - "rouge"
+    - "bleu"
+
+output:
+  output_dir: "./outputs"
