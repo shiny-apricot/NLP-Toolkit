@@ -164,3 +164,23 @@ class LoadDatasetResult:
     train_dataset: Any  # The training split of the dataset
     test_dataset: Any   # The test split of the dataset
     val_dataset: Any    # The validation split of the dataset
+
+@dataclass
+class LoadPretrainedModelResult:
+    """Results from loading a pre-trained model.
+    
+    Contains the loaded model and configuration for evaluation.
+    """
+    model: Any           # The loaded pre-trained model
+    model_config: Any    # Configuration of the loaded model
+
+@dataclass
+class PretrainedEvalResult:
+    """Complete results from running the pre-trained model evaluation pipeline.
+    
+    Aggregates the results from loading the pre-trained model, evaluation,
+    and saving steps to provide a comprehensive view of the pipeline execution outcome.
+    """
+    model_result: LoadPretrainedModelResult  # Results from loading the pre-trained model
+    evaluation_metrics: Metrics              # Metrics from the evaluation stage
+    save_results: SaveResultsOutput          # Results from saving the evaluation output
