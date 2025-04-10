@@ -15,6 +15,7 @@ def train_model(
     dataset: PreprocessedDataset,
     model_name: str,
     output_dir: str,
+    save_model: bool,
     logger: Any
 ) -> TrainModelResult:
     """Train the summarization model.
@@ -23,6 +24,7 @@ def train_model(
         dataset: The preprocessed dataset to use for training.
         model_name: The name of the model to train.
         output_dir: Directory to save model outputs
+        save_model: Whether to save the model during and after training
         logger: Logger instance for logging.
 
     Returns:
@@ -31,6 +33,9 @@ def train_model(
     logger.info(f"Initializing model: {model_name}.")
     model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
 
+    # Set save_strategy based on save_model parameter
+    save_strategy = "steps" if save_model else "no"
+    
     training_args = TrainingArguments(
         output_dir=output_dir,
         learning_rate=5e-5,
@@ -38,12 +43,14 @@ def train_model(
         per_device_eval_batch_size=8,
         num_train_epochs=3,
         weight_decay=0.01,
-        save_total_limit=2,
+        save_total_limit=2 if save_model else None,
         logging_dir=os.path.join(output_dir, "logs"),
         logging_steps=10,
         report_to="none",  # Disable wandb reporting
+        save_strategy=save_strategy,  # Save based on configuration
     )
 
+    logger.info(f"Model saving is {'enabled' if save_model else 'disabled'}")
     logger.info("Starting model training.")
     start_time = time()
     

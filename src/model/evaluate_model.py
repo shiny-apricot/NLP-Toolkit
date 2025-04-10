@@ -3,6 +3,7 @@ from all_dataclass import Metrics, PreprocessedDataset, TrainModelResult
 
 import torch
 from rouge_score import rouge_scorer
+from tqdm import tqdm
 
 
 from typing import Any
@@ -33,7 +34,9 @@ def evaluate_model(
     references = []
 
     logger.info("Generating predictions for evaluation dataset.")
-    for i, example in enumerate(dataset.test_dataset):
+    for i, example in tqdm(enumerate(dataset.test_dataset), 
+                          desc="Generating predictions", 
+                          total=len(dataset.test_dataset)):
         # Convert list to PyTorch tensor
         input_ids = torch.tensor(example["input_ids"]).unsqueeze(0)
         outputs = model.generate(input_ids, max_length=128, num_beams=5)
@@ -44,10 +47,6 @@ def evaluate_model(
 
         predictions.append(prediction)
         references.append(reference)
-
-        # Limit evaluation to a reasonable number to avoid long processing
-        if i >= 100:
-            break
 
     logger.info("Calculating ROUGE scores.")
     rouge1, rouge2, rougeL = 0.0, 0.0, 0.0

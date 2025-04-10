@@ -137,9 +137,10 @@ class OutputConfig:
     """Configuration for output management.
     
     Defines the directory where output files (e.g., model checkpoints,
-    evaluation results) will be saved.
+    evaluation results) will be saved and whether to save the model.
     """
-    output_dir: str  # Directory to save output files
+    output_dir: str   # Directory to save output files
+    save_model: bool = True  # Whether to save the trained model
 
 @dataclass
 class Config:
