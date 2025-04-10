@@ -48,19 +48,23 @@ class ColoredFormatter(logging.Formatter):
         
         return super().format(record)
 
-def setup_logger(log_file: Optional[str] = 'gsm_pipeline.log', 
-                level: int = logging.DEBUG) -> logging.Logger:
+def setup_logger(
+    log_file: Optional[str] = 'summarization.log',
+    output_dir: Optional[str] = None, 
+    level: int = logging.DEBUG
+) -> logging.Logger:
     """Sets up the logger with colored console and file output.
     
     Args:
-        log_file: Full path or relative path for log file. Directories will be created if needed.
+        log_file: Name of the log file
+        output_dir: Directory to store the log file (created if it doesn't exist)
         level: Logging level (default: logging.DEBUG)
     
     Returns:
         Configured logger instance
     """
     
-    logger = logging.getLogger('gsm_pipeline')
+    logger = logging.getLogger('summarization_pipeline')
     
     # Clear existing handlers
     if logger.hasHandlers():
@@ -76,23 +80,31 @@ def setup_logger(log_file: Optional[str] = 'gsm_pipeline.log',
     )
     console_handler.setFormatter(colored_formatter)
     console_handler.flush = sys.stdout.flush  # Force flush
+    logger.addHandler(console_handler)
 
     # File handler (no colors)
     if log_file:
-        # Create directory if it doesn't exist
-        log_dir = os.path.dirname(os.path.abspath(log_file))
-        if log_dir and not os.path.exists(log_dir):
-            os.makedirs(log_dir)
+        # Use output_dir if provided
+        if output_dir:
+            # Create directory if it doesn't exist
+            os.makedirs(output_dir, exist_ok=True)
+            log_file_path = os.path.join(output_dir, log_file)
+        else:
+            # Create directory if it doesn't exist
+            log_dir = os.path.dirname(os.path.abspath(log_file))
+            if log_dir and not os.path.exists(log_dir):
+                os.makedirs(log_dir)
+            log_file_path = log_file
             
-        file_handler = logging.FileHandler(log_file)
+        file_handler = logging.FileHandler(log_file_path)
         file_handler.setLevel(level)
         file_formatter = logging.Formatter(
             '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
         )
         file_handler.setFormatter(file_formatter)
         logger.addHandler(file_handler)
+        logger.info(f"Logging to file: {log_file_path}")
 
-    logger.addHandler(console_handler)
     return logger
 
 def get_logger(name: Optional[str] = 'pipeline') -> logging.Logger:

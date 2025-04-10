@@ -8,8 +8,7 @@ dataset:
   target_column: "highlights"
 
 model:
-  model_type: "bart-large"
-  tokenizer_name: "facebook/bart-large"
+  model_name: "mrm8488/bert-small2bert-small-finetuned-cnn_daily_mail-summarization"
   pretrained_model_name: "facebook/bart-large-cnn"
 
 training:

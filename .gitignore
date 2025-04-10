@@ -1,4 +1,8 @@
 venv-wsl/*
+wandb/
+logs/
+results/
+outputs/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

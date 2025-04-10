@@ -6,18 +6,42 @@ This module defines the high-level workflow for the text summarization project.
 from dataclasses import dataclass
 import yaml
 from typing import Any, Dict, List, Optional
-from utils.project_logger import get_logger
+from utils.project_logger import get_logger, setup_logger
 from all_dataclass import (
     Config, PipelineResult, DatasetConfig, ModelConfig, TrainingConfig, 
     EvaluationConfig, OutputConfig, LoadDatasetResult, PreprocessedDataset, 
-    TrainModelResult, Metrics, EvaluationResult
+    TrainModelResult, Metrics, EvaluationResult, SaveResultsOutput
 )
-from datasets import load_dataset # type: ignore
+from datasets import load_dataset 
 import os
-from transformers import BartTokenizer, AutoTokenizer, BartForConditionalGeneration, TrainingArguments, Trainer  # type: ignore
+from transformers.models.auto.tokenization_auto import AutoTokenizer
+from transformers.models.auto.modeling_auto import AutoModelForSeq2SeqLM
+from transformers.training_args import TrainingArguments
+from transformers.trainer import Trainer
 from time import time
-from rouge_score import rouge_scorer  # type: ignore
+from rouge_score import rouge_scorer  
+import torch
+import json
+from datetime import datetime
 
+
+def create_timestamped_output_dir(base_dir: str) -> str:
+    """Create a timestamped directory for outputs.
+    
+    Args:
+        base_dir: Base directory for outputs
+        
+    Returns:
+        Created directory path with timestamp
+    """
+    # Create timestamp string in format: YYYY-MM-DD_HH-MM-SS
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    output_dir = os.path.join(base_dir, timestamp)
+    
+    # Ensure the directory exists
+    os.makedirs(output_dir, exist_ok=True)
+    
+    return output_dir
 
 def load_config(config_path: str, logger: Any) -> Config:
     """Load the configuration file into a Config dataclass.
@@ -40,10 +64,16 @@ def load_config(config_path: str, logger: Any) -> Config:
         output=OutputConfig(**raw_config["output"]),
     )
 
-def run_summarization_pipeline(logger: Any) -> PipelineResult:
+def run_summarization_pipeline(
+    config_path: str,
+    output_dir: str, 
+    logger: Any
+) -> PipelineResult:
     """Run the full text summarization pipeline.
 
     Args:
+        config_path: Path to configuration file
+        output_dir: Directory to store outputs
         logger: Logger instance for logging.
 
     Returns:
@@ -51,7 +81,7 @@ def run_summarization_pipeline(logger: Any) -> PipelineResult:
         the trained model path and evaluation metrics.
     """
     logger.info("Running summarization pipeline.")
-    config = load_config(config_path="./configs/test_config.yaml", logger=logger)
+    config = load_config(config_path=config_path, logger=logger)
 
     loaded_dataset: LoadDatasetResult = load_and_save_dataset(
         sample_size=config.dataset.sample_size,
@@ -59,7 +89,7 @@ def run_summarization_pipeline(logger: Any) -> PipelineResult:
         logger=logger
     )
     tokenizer = load_tokenizer(
-        tokenizer_name=config.model.tokenizer_name,
+        model_name=config.model.model_name,
         logger=logger
     )
     preprocessed_dataset: PreprocessedDataset = preprocess_dataset(
@@ -68,10 +98,15 @@ def run_summarization_pipeline(logger: Any) -> PipelineResult:
         tokenizer=tokenizer,
         logger=logger
     )
-    # pretrained_cnn_model = get_pretrained_model()
+    
+    # Use timestamped output directory for model outputs
+    model_output_dir = os.path.join(output_dir, "model")
+    os.makedirs(model_output_dir, exist_ok=True)
+    
     train_model_result: TrainModelResult = train_model(
         dataset=preprocessed_dataset,
-        model_type=config.model.model_type,
+        model_name=config.model.model_name,
+        output_dir=model_output_dir,
         logger=logger
     )
     evaluation_result: Metrics = evaluate_model(
@@ -80,9 +115,18 @@ def run_summarization_pipeline(logger: Any) -> PipelineResult:
         tokenizer=tokenizer,
         logger=logger
     )
+    
+    # Save the evaluation results to the timestamped directory
+    save_results = save_evaluation_results(
+        metrics=evaluation_result,
+        output_dir=output_dir,
+        logger=logger
+    )
+    
     return PipelineResult(
         train_model_result=train_model_result,
-        evaluation_metrics=evaluation_result
+        evaluation_metrics=evaluation_result,
+        save_results=save_results
     )
 
 def load_and_save_dataset(sample_size: int, dataset: DatasetConfig, logger: Any) -> LoadDatasetResult:
@@ -125,7 +169,7 @@ def load_and_save_dataset(sample_size: int, dataset: DatasetConfig, logger: Any)
     return result
 
 def preprocess_dataset(
-    raw_dataset: DatasetConfig,
+    raw_dataset: Any,
     dataset_config: DatasetConfig,
     tokenizer: Any,
     logger: Any
@@ -134,6 +178,7 @@ def preprocess_dataset(
 
     Args:
         raw_dataset: The raw dataset to preprocess.
+        dataset_config: Configuration for the dataset.
         tokenizer: The tokenizer to use for preprocessing.
         logger: Logger instance for logging.
 
@@ -141,10 +186,51 @@ def preprocess_dataset(
         PreprocessedDataset: Dataclass containing preprocessed datasets.
     """
     logger.info("Preprocessing dataset.")
-    # Example preprocessing logic
-    train_dataset = raw_dataset["train"].map(lambda x: tokenizer(x[dataset_config.input_column])) # type: ignore
-    test_dataset = raw_dataset["test"].map(lambda x: tokenizer(x[dataset_config.input_column])) # type: ignore
-    val_dataset = raw_dataset["validation"].map(lambda x: tokenizer(x[dataset_config.input_column])) # type: ignore
+    
+    # Use 512 for input length to match model's expected size
+    max_input_length = 512
+    max_target_length = 128
+    
+    def process_example(example):
+        # Tokenize inputs with padding and truncation
+        model_inputs = tokenizer(
+            example[dataset_config.input_column],
+            max_length=max_input_length,
+            padding="max_length",
+            truncation=True
+        )
+        
+        # Tokenize targets with padding and truncation
+        with tokenizer.as_target_tokenizer():
+            labels = tokenizer(
+                example[dataset_config.target_column],
+                max_length=max_target_length,
+                padding="max_length",
+                truncation=True
+            )
+            
+        model_inputs["labels"] = labels["input_ids"]
+        return model_inputs
+    
+    # Apply processing to all splits
+    train_dataset = raw_dataset["train"].map(
+        process_example, 
+        batched=True, 
+        remove_columns=raw_dataset["train"].column_names
+    )
+    
+    test_dataset = raw_dataset["test"].map(
+        process_example, 
+        batched=True, 
+        remove_columns=raw_dataset["test"].column_names
+    )
+    
+    val_dataset = raw_dataset["validation"].map(
+        process_example, 
+        batched=True, 
+        remove_columns=raw_dataset["validation"].column_names
+    )
+    
     logger.info("Dataset preprocessing completed.")
 
     return PreprocessedDataset(
@@ -153,49 +239,53 @@ def preprocess_dataset(
         val_dataset=val_dataset
     )
 
-def load_tokenizer(tokenizer_name: str, logger: Any) -> Any:
-    """Load the tokenizer for the specified model type.
+def load_tokenizer(
+    model_name: str, 
+    logger: Any
+) -> Any:
+    """Load the tokenizer for the specified model.
 
     Args:
-        model_type: The type of model (e.g., 'bart').
+        model_name: The name of the model/tokenizer to load.
         logger: Logger instance for logging.
 
     Returns:
         Any: The loaded tokenizer.
     """
-    logger.info(f"Loading tokenizer for tokenizer: {tokenizer_name}.")
-    # Example tokenizer loading logic
-    return AutoTokenizer.from_pretrained("facebook/bart-large-cnn")
-
+    logger.info(f"Loading tokenizer: {model_name}.")
+    return AutoTokenizer.from_pretrained(model_name)
 
 def train_model(
     dataset: PreprocessedDataset,
-    model_type: str,
+    model_name: str,
+    output_dir: str,
     logger: Any
 ) -> TrainModelResult:
     """Train the summarization model.
 
     Args:
         dataset: The preprocessed dataset to use for training.
-        model_type: The type of model to train (e.g., 'bart').
+        model_name: The name of the model to train.
+        output_dir: Directory to save model outputs
         logger: Logger instance for logging.
 
     Returns:
         TrainModelResult: Dataclass containing the trained model and related info.
     """
-    logger.info(f"Initializing model of type {model_type}.")
-    model = BartForConditionalGeneration.from_pretrained(model_type)
+    logger.info(f"Initializing model: {model_name}.")
+    model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
 
     training_args = TrainingArguments(
-        output_dir="./results",
+        output_dir=output_dir,
         learning_rate=5e-5,
         per_device_train_batch_size=8,
         per_device_eval_batch_size=8,
         num_train_epochs=3,
         weight_decay=0.01,
         save_total_limit=2,
-        logging_dir="./logs",
+        logging_dir=os.path.join(output_dir, "logs"),
         logging_steps=10,
+        report_to="none",  # Disable wandb reporting
     )
 
     logger.info("Starting model training.")
@@ -240,14 +330,21 @@ def evaluate_model(
     references = []
 
     logger.info("Generating predictions for evaluation dataset.")
-    for example in dataset.test_dataset:
-        inputs = tokenizer(
-            example["text"], truncation=True, padding="max_length", return_tensors="pt"
-        )
-        outputs = model.generate(inputs["input_ids"], max_length=50, num_beams=5)
+    for i, example in enumerate(dataset.test_dataset):
+        # Convert list to PyTorch tensor
+        input_ids = torch.tensor(example["input_ids"]).unsqueeze(0)
+        outputs = model.generate(input_ids, max_length=128, num_beams=5)
         prediction = tokenizer.decode(outputs[0], skip_special_tokens=True)
+        
+        # Decode reference from label ids
+        reference = tokenizer.decode(example["labels"], skip_special_tokens=True)
+        
         predictions.append(prediction)
-        references.append(example["summary"])
+        references.append(reference)
+        
+        # Limit evaluation to a reasonable number to avoid long processing
+        if i >= 100:
+            break
 
     logger.info("Calculating ROUGE scores.")
     rouge1, rouge2, rougeL = 0.0, 0.0, 0.0
@@ -258,17 +355,98 @@ def evaluate_model(
         rougeL += scores["rougeL"].fmeasure
 
     num_samples = len(predictions)
-    logger.info("Evaluation completed.")
+    logger.info(f"Evaluation completed on {num_samples} samples.")
     return Metrics(
         rouge_1=rouge1 / num_samples,
         rouge_2=rouge2 / num_samples,
         rouge_L=rougeL / num_samples
     )
 
+def save_evaluation_results(
+    metrics: Metrics,
+    output_dir: str,
+    logger: Any
+) -> SaveResultsOutput:
+    """Save evaluation metrics to a JSON file.
+    
+    Creates a JSON file containing ROUGE metrics from the evaluation.
+    
+    Args:
+        metrics: The evaluation metrics (rouge_1, rouge_2, rouge_L)
+        output_dir: Directory to save the results
+        logger: Logger instance for logging operations
+        
+    Returns:
+        SaveResultsOutput: Dataclass containing:
+            - file_path: Path where results were saved (empty if failed)
+            - success: Boolean indicating if the save operation succeeded
+    """
+    logger.info(f"Saving evaluation results to directory: {output_dir}")
+    logger.info(f"Metrics summary - ROUGE-1: {metrics.rouge_1:.4f}, ROUGE-2: {metrics.rouge_2:.4f}, ROUGE-L: {metrics.rouge_L:.4f}")
+    
+    # Create output directory if it doesn't exist
+    os.makedirs(output_dir, exist_ok=True)
+    
+    file_name = f"evaluation_results.json"
+    file_path = os.path.join(output_dir, file_name)
+    
+    try:
+        # Convert metrics to dictionary
+        metrics_dict = {
+            "rouge_1": metrics.rouge_1,
+            "rouge_2": metrics.rouge_2,
+            "rouge_L": metrics.rouge_L,
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
+        
+        # Save as JSON
+        with open(file_path, 'w') as f:
+            json.dump(metrics_dict, f, indent=4)
+            
+        logger.info(f"Evaluation results successfully saved to: {file_path}")
+        return SaveResultsOutput(file_path=file_path, success=True)
+    except IOError as e:
+        logger.error(f"I/O error when saving evaluation results: {str(e)}")
+        return SaveResultsOutput(file_path="", success=False)
+    except Exception as e:
+        logger.error(f"Unexpected error when saving evaluation results: {str(e)}")
+        return SaveResultsOutput(file_path="", success=False)
+
 if __name__ == "__main__":
-    """Main function to run the text summarization pipeline."""
+    """Main entry point for the text summarization pipeline.
+    
+    Sets up logging, executes the complete summarization pipeline,
+    and reports success or failure.
+    """
     print("Starting text summarization pipeline...")
-    logger = get_logger(__name__)
-    logger.info("Starting text summarization pipeline.")
-    result = run_summarization_pipeline(logger=logger)
-    logger.info("Pipeline completed successfully.")
+    
+    # Load base config to get output directory
+    with open("./configs/test_config.yaml", "r") as file:
+        raw_config = yaml.safe_load(file)
+    
+    # Create timestamped output directory
+    base_output_dir = raw_config["output"]["output_dir"]
+    timestamped_dir = create_timestamped_output_dir(base_output_dir)
+    print(f"Created output directory: {timestamped_dir}")
+    
+    # Setup logger with the timestamped directory
+    logger = setup_logger('summarization.log', output_dir=timestamped_dir)
+    logger.info(f"Text summarization pipeline initialized. Outputs will be saved to: {timestamped_dir}")
+    
+    try:
+        result = run_summarization_pipeline(
+            config_path="./configs/test_config.yaml", 
+            output_dir=timestamped_dir,
+            logger=logger
+        )
+        logger.info(f"Pipeline completed successfully with ROUGE-L score of {result.evaluation_metrics.rouge_L:.4f}")
+        if result.save_results.success:
+            logger.info(f"Results saved to {result.save_results.file_path}")
+        else:
+            logger.warning("Pipeline completed but results could not be saved")
+    except Exception as e:
+        logger.error(f"Pipeline failed with error: {str(e)}")
+        print(f"Pipeline failed. See logs for details.")
+        raise
+    else:
+        print(f"Text summarization pipeline completed successfully. Outputs saved to: {timestamped_dir}")
