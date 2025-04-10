@@ -46,6 +46,17 @@ def train_model(
 
     logger.info("Starting model training.")
     start_time = time()
+    
+    # Custom Trainer to handle num_items_in_batch
+    # and other custom logic if needed
+    if "mrm8488" in model_name:
+        # Custom logic for mrm8488 models
+        trainer = MyTrainer(
+            model=model,
+            args=training_args,
+            train_dataset=dataset.train_dataset,
+            eval_dataset=dataset.val_dataset,
+        )
     trainer = Trainer(
         model=model,
         args=training_args,
@@ -60,3 +71,10 @@ def train_model(
         model=model,
         training_args=training_args
     )
+
+
+class MyTrainer(Trainer):
+    def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
+        outputs = model(**inputs)  # num_items_in_batch zaten model'e gönderilmeyecek
+        loss = outputs.loss
+        return (loss, outputs) if return_outputs else loss
