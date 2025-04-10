@@ -4,6 +4,8 @@ This module defines the high-level workflow for the text summarization project.
 """
 
 import yaml
+import argparse
+from pathlib import Path
 from utils.create_timestamped_output_dir import create_timestamped_output_dir
 from run_summarization_pipeline import run_summarization_pipeline
 from utils.project_logger import setup_logger
@@ -15,10 +17,19 @@ if __name__ == "__main__":
     Sets up logging, executes the complete summarization pipeline,
     and reports success or failure.
     """
+    # Set up command-line argument parsing
+    parser = argparse.ArgumentParser(description='Run text summarization pipeline')
+    parser.add_argument('--config', type=str, default='test_config.yaml',
+                        help='Configuration filename (stored in ./configs/ directory)')
+    args = parser.parse_args()
+    
     print("Starting text summarization pipeline...")
     
+    # Construct full config path using configs directory with Path
+    config_path = Path('./configs') / args.config
+    
     # Load base config to get output directory
-    with open("./configs/test_config.yaml", "r") as file:
+    with open(config_path, "r") as file:
         raw_config = yaml.safe_load(file)
     
     # Create timestamped output directory
@@ -32,7 +43,7 @@ if __name__ == "__main__":
     
     try:
         result = run_summarization_pipeline(
-            config_path="./configs/test_config.yaml", 
+            config_path=str(config_path), 
             output_dir=timestamped_dir,
             logger=logger
         )
