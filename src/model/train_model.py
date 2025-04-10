@@ -76,9 +76,10 @@ def train_model(
 
 class MyTrainer(Trainer):
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
-        # inputs dict'ini kopyala ve hatalı key'i çıkar
-        inputs = {k: v for k, v in inputs.items() if k != "num_items_in_batch"}
+        # Fazla key varsa sil
+        if "num_items_in_batch" in inputs:
+            inputs = {k: v for k, v in inputs.items() if k != "num_items_in_batch"}
         
-        outputs = model(**inputs)  # Artık num_items_in_batch yok
+        outputs = model(**inputs)
         loss = outputs.loss
         return (loss, outputs) if return_outputs else loss
