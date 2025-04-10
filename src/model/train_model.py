@@ -51,6 +51,7 @@ def train_model(
     # and other custom logic if needed
     if "mrm8488" in model_name:
         # Custom logic for mrm8488 models
+        logger.info("Using custom trainer for mrm8488 model.")
         trainer = MyTrainer(
             model=model,
             args=training_args,
@@ -75,6 +76,9 @@ def train_model(
 
 class MyTrainer(Trainer):
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
-        outputs = model(**inputs)  # num_items_in_batch zaten model'e gönderilmeyecek
+        # inputs dict'ini kopyala ve hatalı key'i çıkar
+        inputs = {k: v for k, v in inputs.items() if k != "num_items_in_batch"}
+        
+        outputs = model(**inputs)  # Artık num_items_in_batch yok
         loss = outputs.loss
         return (loss, outputs) if return_outputs else loss
