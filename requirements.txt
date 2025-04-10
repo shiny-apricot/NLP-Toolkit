@@ -8,7 +8,6 @@ scikit-learn
 # NLP Libraries
 nltk
 rouge-score
-sentence-transformers
 
 # Data Processing
 numpy
