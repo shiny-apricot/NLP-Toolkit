@@ -23,9 +23,9 @@ def preprocess_dataset(
     """
     logger.info("Preprocessing dataset.")
 
-    # Use 512 for input length to match model's expected size
-    max_input_length = 512
-    max_target_length = 128
+    # Use values from config instead of hardcoded values
+    max_input_length = dataset_config.max_input_length
+    max_target_length = dataset_config.max_target_length
 
     def process_example(example):
         # Tokenize inputs with padding and truncation

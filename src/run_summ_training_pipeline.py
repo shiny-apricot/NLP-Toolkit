@@ -14,7 +14,6 @@ import yaml
 import argparse
 from pathlib import Path
 from utils.create_timestamped_output_dir import create_timestamped_output_dir
-from run_summ_training_pipeline import run_summarization_pipeline
 from utils.project_logger import setup_logger
 
 

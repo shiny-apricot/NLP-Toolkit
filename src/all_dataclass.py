@@ -1,7 +1,7 @@
 """Module for all dataclasses used in the summarization pipeline."""
 
 from dataclasses import dataclass
-from typing import Any, List, Literal, Optional
+from typing import Any, List, Literal, Optional, Dict
 
 
 @dataclass
@@ -102,7 +102,8 @@ class DatasetConfig:
     sample_size: int                                # Number of examples to use
     input_column: str                               # Column name containing input text
     target_column: str                              # Column name containing target summaries
-
+    max_input_length: int                          # Maximum length of input text
+    max_target_length: int                         # Maximum length of target summaries
 @dataclass
 class ModelConfig:
     """Configuration for model selection and initialization.
@@ -156,15 +157,43 @@ class Config:
     output: OutputConfig      # Configuration for output management
 
 @dataclass
-class LoadDatasetResult:
-    """Results from loading and splitting a dataset.
+class DatasetStatistics:
+    """Statistics about dataset texts and their lengths."""
+    article_max_length: int
+    article_min_length: int
+    article_avg_length: float
+    article_median_length: float
+    article_std_length: float
+    article_max_char_length: int
+    article_avg_char_length: float
     
-    Contains the full dataset and the split train, test, and validation datasets.
-    """
-    dataset: Any        # The full loaded dataset
-    train_dataset: Any  # The training split of the dataset
-    test_dataset: Any   # The test split of the dataset
-    val_dataset: Any    # The validation split of the dataset
+    summary_max_length: int
+    summary_min_length: int
+    summary_avg_length: float
+    summary_median_length: float
+    summary_std_length: float
+    summary_max_char_length: int
+    summary_avg_char_length: float
+    
+    article_length_distribution: Dict[str, int]
+    summary_length_distribution: Dict[str, int]
+    
+    dataset_size: int
+    compression_ratio: float  # avg(summary_length/article_length)
+
+@dataclass
+class LoadDatasetResult:
+    """Result of loading and preprocessing a dataset."""
+    dataset: Any
+    train_dataset: Any
+    test_dataset: Any
+    val_dataset: Any
+    train_statistics: DatasetStatistics = None  # type: ignore
+    test_statistics: DatasetStatistics = None  # type: ignore
+    validation_statistics: DatasetStatistics = None  # type: ignore
+    full_train_statistics: DatasetStatistics = None  # type: ignore
+    full_test_statistics: DatasetStatistics = None  # type: ignore
+    full_validation_statistics: DatasetStatistics = None  # type: ignore
 
 @dataclass
 class LoadPretrainedModelResult:
