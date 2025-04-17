@@ -1,0 +1,14 @@
+# Configuration file for the text summarization pipeline.
+
+dataset:
+  dataset_name: "cnn_dailymail"
+  dataset_version: "3.0.0"
+  sample_size: 0
+  input_column: "article"
+  target_column: "highlights"
+  max_input_length: 1300
+  max_target_length: 256
+
+output:
+  output_dir: "./outputs"
+  save_model: false
