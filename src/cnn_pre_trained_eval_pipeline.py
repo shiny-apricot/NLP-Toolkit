@@ -9,7 +9,7 @@ from data_processing.load_and_save_dataset import load_and_save_dataset
 from data_processing.load_tokenizer import load_tokenizer
 from data_processing.preprocess_dataset import preprocess_dataset
 from model.evaluate_model import evaluate_model
-from model.load_pretrained_model import load_pretrained_model
+from model.load_pretrained_model import load_pretrained_model # type: ignore
 from model.save_evaluation_results import save_evaluation_results
 from utils.load_config import load_config
 
@@ -73,7 +73,7 @@ def run_pretrained_eval_pipeline(
 
     # Evaluate the pre-trained model
     evaluation_result: Metrics = evaluate_model(
-        train_model_result=train_model_result,
+        train_model_result=train_model_result, # type: ignore
         dataset=preprocessed_dataset,
         tokenizer=tokenizer,
         logger=logger

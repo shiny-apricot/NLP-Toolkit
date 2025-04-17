@@ -6,7 +6,7 @@ dataset:
   sample_size: 10
   input_column: "article"
   target_column: "highlights"
-  max_input_length: 1024
+  max_input_length: 512
   max_target_length: 128
 
 model:

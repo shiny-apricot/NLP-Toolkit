@@ -124,6 +124,19 @@ class TrainingConfig:
     batch_size: int      # Number of samples per batch
     learning_rate: float # Learning rate for the optimizer
     num_epochs: int      # Number of epochs to train the model
+    gradient_accumulation_steps: int = 1  # Number of steps to accumulate gradients
+    mixed_precision: bool = False  # Whether to use mixed precision training
+    eval_steps: int = 500  # Evaluate model every n steps
+
+@dataclass
+class HardwareConfig:
+    """Configuration for hardware-specific settings.
+    
+    Defines parameters specific to the hardware being used for training,
+    such as GPU memory utilization and random seed.
+    """
+    gpu_memory_utilization: float = 0.9  # Percentage of GPU memory to use
+    seed: int = 42  # Random seed for reproducibility
 
 @dataclass
 class EvaluationConfig:
@@ -132,6 +145,7 @@ class EvaluationConfig:
     Specifies which metrics to calculate during evaluation.
     """
     metrics: List[str]  # List of metric names to calculate
+    eval_batch_size: int = 16  # Batch size for evaluation
 
 @dataclass
 class OutputConfig:
@@ -142,19 +156,22 @@ class OutputConfig:
     """
     output_dir: str   # Directory to save output files
     save_model: bool = True  # Whether to save the trained model
+    save_steps: int = 1000  # Save model checkpoint every n steps
+    logging_steps: int = 100  # Log training metrics every n steps
 
 @dataclass
 class Config:
     """Complete configuration for the summarization pipeline.
     
     Aggregates all individual configurations for dataset, model, training,
-    evaluation, and output management into a single configuration object.
+    evaluation, output management into a single configuration object.
     """
     dataset: DatasetConfig    # Configuration for dataset selection and processing
     model: ModelConfig        # Configuration for model selection and initialization
     training: TrainingConfig  # Configuration for model training
     evaluation: EvaluationConfig  # Configuration for model evaluation
     output: OutputConfig      # Configuration for output management
+    hardware: Optional[HardwareConfig] = None  # Hardware-specific configuration
 
 @dataclass
 class DatasetStatistics:

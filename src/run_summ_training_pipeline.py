@@ -60,7 +60,7 @@ def run_summarization_pipeline(
         dataset=preprocessed_dataset,
         model_name=config.model.model_name,
         output_dir=model_output_dir,
-        save_model=config.output.save_model,
+        config=config,  # Pass the complete config
         logger=logger
     )
     evaluation_result: Metrics = evaluate_model(

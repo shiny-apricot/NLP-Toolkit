@@ -1,28 +1,38 @@
-# Configuration file for the text summarization pipeline.
+# Configuration file for the text summarization pipeline optimized for ml.g4dn.xlarge.
 
 dataset:
   dataset_name: "cnn_dailymail"
   dataset_version: "3.0.0"
-  sample_size: 0
+  sample_size: 1000  # Start with a smaller sample to test the pipeline
   input_column: "article"
   target_column: "highlights"
-  max_input_length: 512
+  max_input_length: 384  # Reduced to save memory
   max_target_length: 128
 
 model:
-  model_name: "google-t5/t5-small"
+  model_name: "google-t5/t5-small"  # Better suited for this GPU size
   pretrained_model_name: "facebook/bart-large-cnn"
 
 training:
-  batch_size: 16
+  batch_size: 8  # Reduced to fit GPU memory
+  gradient_accumulation_steps: 2  # Simulates batch size of 16
   learning_rate: 5e-5
   num_epochs: 3
+  mixed_precision: true  # Enable fp16 training
+  eval_steps: 500  # Evaluate every 500 steps
+
+hardware:
+  gpu_memory_utilization: 0.9  # Use 90% of GPU memory
+  seed: 42
 
 evaluation:
   metrics:
     - "rouge"
     - "bleu"
+  eval_batch_size: 16
 
 output:
   output_dir: "./outputs"
-  save_model: false
+  save_model: true
+  save_steps: 1000  # Save checkpoint every 1000 steps
+  logging_steps: 100

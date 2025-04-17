@@ -1,4 +1,4 @@
-from all_dataclass import Config, DatasetConfig, EvaluationConfig, ModelConfig, OutputConfig, TrainingConfig
+from all_dataclass import Config, DatasetConfig, EvaluationConfig, HardwareConfig, ModelConfig, OutputConfig, TrainingConfig
 
 
 import yaml
@@ -27,10 +27,16 @@ def load_config(config_path: str, logger: Any) -> Config:
         logger.info("Sample size is 0, will load all available data.")
         dataset_config["sample_size"] = None
     
+    # Create hardware config if present in raw_config
+    hardware_config = None
+    if "hardware" in raw_config:
+        hardware_config = HardwareConfig(**raw_config["hardware"])
+    
     return Config(
         dataset=DatasetConfig(**dataset_config),
         model=ModelConfig(**raw_config["model"]),
         training=TrainingConfig(**raw_config["training"]),
         evaluation=EvaluationConfig(**raw_config["evaluation"]),
         output=OutputConfig(**raw_config["output"]),
+        hardware=hardware_config
     )
