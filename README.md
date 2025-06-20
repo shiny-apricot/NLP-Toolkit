@@ -1,4 +1,4 @@
-# Text Summarization MVP for AWS SageMaker
+# Text Summarization NLP Toolkit
 
 A comprehensive text summarization solution that implements both extractive (TextRank) and abstractive (BART) summarization approaches, optimized for AWS SageMaker deployment.
 
